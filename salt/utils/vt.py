@@ -75,11 +75,8 @@ def setwinsize(child, rows=80, cols=80):
     """
     # pylint: disable=used-before-assignment
     TIOCSWINSZ = getattr(termios, "TIOCSWINSZ", -2146929561)
-    if TIOCSWINSZ == 2148037735:
-        # Same bits, but with sign.
-        TIOCSWINSZ = -2146929561
     # Note, assume ws_xpixel and ws_ypixel are zero.
-    packed = struct.pack(b"HHHH", rows, cols, 0, 0)
+    packed = struct.pack("HHHH", rows, cols, 0, 0)
     fcntl.ioctl(child, TIOCSWINSZ, packed)
 
 
@@ -91,9 +88,9 @@ def getwinsize(child):
     Thank you for the shortcut PEXPECT
     """
     TIOCGWINSZ = getattr(termios, "TIOCGWINSZ", 1074295912)
-    packed = struct.pack(b"HHHH", 0, 0, 0, 0)
+    packed = struct.pack("HHHH", 0, 0, 0, 0)
     ioctl = fcntl.ioctl(child, TIOCGWINSZ, packed)
-    return struct.unpack(b"HHHH", ioctl)[0:2]
+    return struct.unpack("HHHH", ioctl)[0:2]
 
 
 class Terminal:
