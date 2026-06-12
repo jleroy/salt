@@ -20,6 +20,8 @@ pr-testrun-slugs:
   - windows-2025-pkg
   - macos-15
   - macos-15-pkg
+  - macos-26
+  - macos-26-pkg
 
 # Test run slugs for full testing (all platforms)
 full-testrun-slugs:
@@ -158,6 +160,16 @@ test-salt-listing:
       display_name: "macOS 15 (M1)"
       arch: arm64
       runner: macos-15
+      enabled: true
+    - slug: macos-26-intel
+      display_name: "macOS 26 (Intel)"
+      arch: x86_64
+      runner: macos-26-intel
+      enabled: true
+    - slug: macos-26
+      display_name: "macOS 26 (M1)"
+      arch: arm64
+      runner: macos-26
       enabled: true
   windows:
     - slug: windows-2022
@@ -302,6 +314,16 @@ test-salt-pkg-listing:
       display_name: "macOS 15 (M1)"
       arch: arm64
       runner: macos-15
+      enabled: true
+    - slug: macos-26-intel-pkg
+      display_name: "macOS 26 (Intel)"
+      arch: x86_64
+      runner: macos-26-intel
+      enabled: true
+    - slug: macos-26-pkg
+      display_name: "macOS 26 (M1)"
+      arch: arm64
+      runner: macos-26
       enabled: true
   windows:
     - slug: windows-2022-nsis-pkg

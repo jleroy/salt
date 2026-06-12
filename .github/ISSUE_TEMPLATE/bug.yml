@@ -44,6 +44,7 @@ body:
       options:
         - 3006.x
         - 3007.x
+        - 3008.x
   - type: dropdown
     id: operating-systems
     validations:
@@ -61,9 +62,9 @@ body:
         - debian-11
         - debian-12
         - fedora-42
-        - macos-13
         - macos-14
         - macos-15
+        - macos-26
         - opensuse-leap-15.5
         - oraclelinux-8
         - oraclelinux-9
