@@ -908,7 +908,7 @@ jobs:
           SALT_TRANSPORT: ${{ matrix.transport }}
         run: |
           sudo -E nox --force-color -e ${{ inputs.nox-session }} -- ${{ matrix.tests-chunk }} -- \
-            -k "mac or darwin" --core-tests --slow-tests --suppress-no-test-exit-code \
+            --core-tests --slow-tests --suppress-no-test-exit-code \
             --from-filenames=testrun-changed-files.txt
 
       - name: Run Fast Tests
@@ -934,7 +934,7 @@ jobs:
           SALT_TRANSPORT: ${{ matrix.transport }}
         run: |
           sudo -E nox --force-color -e ${{ inputs.nox-session }} -- ${{ matrix.tests-chunk }} -- \
-            -k "mac or darwin" --suppress-no-test-exit-code
+            --suppress-no-test-exit-code
 
       - name: Run Slow Tests
         id: run-slow-tests
@@ -959,7 +959,7 @@ jobs:
           SALT_TRANSPORT: ${{ matrix.transport }}
         run: |
           sudo -E nox --force-color -e ${{ inputs.nox-session }} -- ${{ matrix.tests-chunk }} -- \
-            -k "mac or darwin" --suppress-no-test-exit-code --no-fast-tests --slow-tests
+            --suppress-no-test-exit-code --no-fast-tests --slow-tests
 
       - name: Run Core Tests
         id: run-core-tests
@@ -984,7 +984,7 @@ jobs:
           SALT_TRANSPORT: ${{ matrix.transport }}
         run: |
           sudo -E nox --force-color -e ${{ inputs.nox-session }} -- ${{ matrix.tests-chunk }} -- \
-            -k "mac or darwin" --suppress-no-test-exit-code --no-fast-tests --core-tests
+            --suppress-no-test-exit-code --no-fast-tests --core-tests
 
       - name: Run Flaky Tests
         id: run-flaky-tests
@@ -1009,7 +1009,7 @@ jobs:
           SALT_TRANSPORT: ${{ matrix.transport }}
         run: |
           sudo -E nox --force-color -e ${{ inputs.nox-session }} -- ${{ matrix.tests-chunk }} -- \
-            -k "mac or darwin" --suppress-no-test-exit-code --no-fast-tests --flaky-jail
+            --suppress-no-test-exit-code --no-fast-tests --flaky-jail
 
       - name: Run Full Tests
         id: run-full-tests
@@ -1034,7 +1034,7 @@ jobs:
           SALT_TRANSPORT: ${{ matrix.transport }}
         run: |
           sudo -E nox --force-color -e ${{ inputs.nox-session }} -- ${{ matrix.tests-chunk }} -- \
-            --slow-tests --core-tests -k "mac or darwin" --test-group-count=${{ matrix.test-group-count || 1 }} --test-group=${{ matrix.test-group || 1 }}
+            --slow-tests --core-tests --test-group-count=${{ matrix.test-group-count || 1 }} --test-group=${{ matrix.test-group || 1 }}
 
 
       - name: Fix file ownership
