@@ -25,6 +25,7 @@ except ImportError:
     HAS_MODULES = False
 
 
+@pytest.mark.skip_on_darwin(reason="Linux-only module, YUM not available on macOS")
 @pytest.mark.skipif(not HAS_MODULES, reason="Salt modules could not be loaded")
 class YumKernelPkgTestCase(KernelPkgTestCase, TestCase, LoaderModuleMockMixin):
     """
