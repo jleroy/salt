@@ -76,4 +76,8 @@ def test_if_sys_executable_is_used_to_call_pam_auth(mock_pam):
         assert salt.auth.pam.auth(
             username="fnord", password="fnord", service="login", encoding="utf-8"
         )
-        assert f.name in run_mock.call_args_list[0][0][0]
+
+        # On macOS /var/tmp is symlinked to /private/var/tmp.
+        # salt.auth.pam.authenticate() resolve sys.executable using
+        # pathlib.Path().resolve(), so we need to do the same here.
+        assert os.path.realpath(f.name) in run_mock.call_args_list[0][0][0]
