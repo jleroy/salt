@@ -97,6 +97,7 @@ def test_pip_args_installing_with_target():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip_on_darwin(reason="Linux-only multiprocessing default change")
 @pytest.mark.skip_on_windows(reason="Linux-only multiprocessing default change")
 @pytest.mark.skipif(
     sys.version_info < (3, 14),
@@ -112,6 +113,7 @@ def test_salt_scripts_pins_fork_start_method():
     assert multiprocessing.get_start_method(allow_none=False) == "fork"
 
 
+@pytest.mark.skip_on_darwin(reason="Linux-only multiprocessing default change")
 @pytest.mark.skip_on_windows(reason="Linux-only multiprocessing default change")
 @pytest.mark.skipif(
     sys.version_info < (3, 14),
