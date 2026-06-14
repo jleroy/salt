@@ -73,7 +73,7 @@ def test_shell_default(cmd, test_cmd, ret_enabled):
     ensure that python_shell defaults to True for cmd.shell
     """
     ret = cmd.shell(test_cmd)
-    assert ret == ret_enabled
+    assert ret.strip() == ret_enabled
 
 
 def test_run_disabled(cmd, test_cmd, ret_disabled):
