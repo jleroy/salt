@@ -1069,6 +1069,9 @@ def test_total_physical_memory(stub_memory_usage):
         assert ret == 15722012672
 
 
+@pytest.mark.skip_on_darwin(
+    reason='psutil._psosx.Process() doesn\'t have a "_read_status_file" attribute. TODO: Write macOS test.'
+)
 def test_proc_info():
     """
     Testing proc_info function in the ps module
