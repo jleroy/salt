@@ -4,8 +4,8 @@ import copy
 import logging
 import os
 import pathlib
-import random
 import signal
+import tempfile
 import time
 import uuid
 
@@ -1700,20 +1700,19 @@ async def test_minion_manager_async_stop(io_loop, minion_opts, tmp_path):
     """
 
     # Socket path is tmp_path + "/sock/minion_event_[hash]_pub.ipc", which
-    # gives something like "/private/var/folders/_y/_[random_id]/T/
-    # pytest-of-[username]/pytest-6/test_minion_manager_async_stop0/sock/
+    # gives something like "/private/var/folders/_y/_[random_29_chars]/T/
+    # pytest-of-[username]/pytest-X/[test_function_name]/sock/
     # minion_event_[hash]_pub.ipc" on macOS, that exceed macOS socket path 104
     # characters limit.
     # Also since Mac OS X 10.2 Jaguar, usernames can be up to 255 characters
     # long, so it's probably not a good idea to include them in socket path.
     if salt.utils.platform.is_darwin():
-        rand = random.randint(1000, 9999)
-        minion_opts["sock_dir"] = f"/tmp/test_minion_manager_async_stop_{rand}"
+        # /private/var/folders/_y/_[random_29_chars]/T/tmp[random_8_chars]
+        minion_opts["sock_dir"] = tempfile.mkdtemp()
 
     else:
         minion_opts["sock_dir"] = str(tmp_path / "sock")
-
-    os.makedirs(minion_opts["sock_dir"])
+        os.makedirs(minion_opts["sock_dir"])
 
     # Create a MinionManager instance with a mock minion
     mm = salt.minion.MinionManager(minion_opts)
