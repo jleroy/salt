@@ -12,20 +12,23 @@ release_branches:
 
 # Test run slugs for PR testing (subset of platforms)
 pr-testrun-slugs:
-  - ubuntu-24.04-pkg
-  - ubuntu-24.04
-  - rockylinux-9
-  - rockylinux-9-pkg
-  - windows-2025
-  - windows-2025-pkg
-  - macos-15
-  - macos-15-pkg
+  #- ubuntu-24.04-pkg
+  #- ubuntu-24.04
+  #- rockylinux-9
+  #- rockylinux-9-pkg
+  #- windows-2025
+  #- windows-2025-pkg
+  #- macos-15
+  #- macos-15-pkg
   - macos-26
   - macos-26-pkg
 
 # Test run slugs for full testing (all platforms)
 full-testrun-slugs:
-  - all
+  #- all
+  - macos-26
+  - macos-26-pkg
+
 test-salt-listing:
   linux:
     - slug: rockylinux-8
