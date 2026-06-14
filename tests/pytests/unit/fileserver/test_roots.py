@@ -6,7 +6,6 @@ import copy
 import os
 import pathlib
 import shutil
-import sys
 import textwrap
 
 import pytest
