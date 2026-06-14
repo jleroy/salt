@@ -4,6 +4,7 @@ import copy
 import logging
 import os
 import pathlib
+import random
 import signal
 import time
 import uuid
@@ -1697,8 +1698,20 @@ async def test_minion_manager_async_stop(io_loop, minion_opts, tmp_path):
     Ensure MinionManager's stop method works correctly and calls the
     stop_async method
     """
-    # Setup sock_dir with short path
-    minion_opts["sock_dir"] = str(tmp_path / "sock")
+
+    # Socket path is tmp_path + "/sock/minion_event_[hash]_pub.ipc", which
+    # gives something like "/private/var/folders/_y/_[random_id]/T/
+    # pytest-of-[username]/pytest-6/test_minion_manager_async_stop0/sock/
+    # minion_event_[hash]_pub.ipc" on macOS, that exceed macOS socket path 104
+    # characters limit.
+    # Also since Mac OS X 10.2 Jaguar, usernames can be up to 255 characters
+    # long, so it's probably not a good idea to include them in socket path.
+    if salt.utils.platform.is_darwin():
+        rand = random.randint(1000, 9999)
+        minion_opts["sock_dir"] = f"/tmp/test_minion_manager_async_stop_{rand}"
+
+    else:
+        minion_opts["sock_dir"] = str(tmp_path / "sock")
 
     os.makedirs(minion_opts["sock_dir"])
 
