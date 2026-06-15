@@ -629,7 +629,14 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
         if self._run is not None:
             self._run.set()  # Signal shutdown
         if self._socket is not None:
-            self._socket.shutdown(socket.SHUT_RDWR)
+            try:
+                self._socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                # On macOS, shutdown() raises ENOTCONN (errno 57) when called on
+                # a listening socket or one that is already disconnected, while
+                # Linux silently allows it. Ignore the error so close()
+                # completes.
+                pass
             self._socket.close()
             self._socket = None
 
