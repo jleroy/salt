@@ -6,6 +6,9 @@ from tornado.httpclient import HTTPError
 import salt.utils.json
 from salt.netapi.rest_tornado import saltnado
 
+# GitHub's macOS CI can be slow.
+pytestmark = [pytest.mark.timeout_unless_on_windows(180)]
+
 
 @pytest.fixture
 def app_urls():
