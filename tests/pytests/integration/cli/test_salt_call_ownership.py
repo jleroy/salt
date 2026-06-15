@@ -66,6 +66,7 @@ def non_root_minion(salt_master, salt_factories):
         yield factory
 
 
+@pytest.mark.skip_if_not_root
 @pytest.mark.skipif(shutil.which("sudo") is None, reason="sudo is not available")
 def test_salt_call_preserves_ownership(non_root_minion, salt_call_wrapper):
     """
@@ -104,11 +105,13 @@ def test_salt_call_preserves_ownership(non_root_minion, salt_call_wrapper):
             # We expect it to be owned by current_user (uid), not root (0)
             if stat.st_uid == 0:
                 pytest.fail(
-                    f"File {path} is owned by root! salt-call failed to drop privileges correctly."
+                    f"File {path} is owned by root! salt-call failed to drop "
+                    "privileges correctly."
                 )
 
             files_checked += 1
 
-    # Ensure we actually checked some files (cache shouldn't be empty after running a command)
-    # salt-call usually populates grains/minion_id/etc in cache
+    # Ensure we actually checked some files (cache shouldn't be empty after
+    # running a command) salt-call usually populates grains/minion_id/etc in
+    # cache.
     assert files_checked > 0, "No files found in cache directory to check"
