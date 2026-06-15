@@ -514,13 +514,11 @@ def _run(
         # the command under bash as a login shell
         try:
             # Do not rely on populated __salt__ dict (ie avoid __salt__['user.info'])
-            user_shell = [x for x in pwd.getpwall() if x.pw_name == runas][0].pw_shell
-            if re.search("bash$", user_shell):
-                cmd = "{shell} -l -c {cmd}".format(
-                    shell=user_shell, cmd=_cmd_quote(cmd)
-                )
-        except (AttributeError, IndexError):
-            pass
+            user_shell = pwd.getpwnam(runas).pw_shell
+            if user_shell.endswith('/bash'):
+                cmd = f"{user_shell} -l -c {_cmd_quote(cmd)}"
+        except KeyError:
+            raise CommandExecutionError(f"User '{runas}' is not available")
 
         # Ensure the login is simulated correctly (note: su runs sh, not bash,
         # which causes the environment to be initialised incorrectly, which is
