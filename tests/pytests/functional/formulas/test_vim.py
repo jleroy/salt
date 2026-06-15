@@ -9,6 +9,9 @@ import pytest
 pytestmark = [
     pytest.mark.skip_on_windows,
     pytest.mark.destructive_test,
+    pytest.mark.skip_on_darwin(
+        reason="macOS minions don't have 'oscodename' grain"
+    ),
     pytest.mark.timeout_unless_on_windows(240),
     pytest.mark.skipif(
         'grains["oscodename"] == "Photon"',
