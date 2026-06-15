@@ -515,7 +515,7 @@ def _run(
         try:
             # Do not rely on populated __salt__ dict (ie avoid __salt__['user.info'])
             user_shell = pwd.getpwnam(runas).pw_shell
-            if user_shell.endswith('/bash'):
+            if user_shell.endswith("/bash"):
                 cmd = f"{user_shell} -l -c {_cmd_quote(cmd)}"
         except KeyError:
             raise CommandExecutionError(f"User '{runas}' is not available")

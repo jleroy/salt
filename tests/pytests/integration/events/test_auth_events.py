@@ -23,6 +23,7 @@ pytestmark = [
     pytest.mark.timeout_unless_on_windows(180),
 ]
 
+
 def test_auth_events_autosign_grains_pend_enabled(salt_master_factory, event_listener):
     """
     Test auth events when auth_events_autosign_grains contains 'pend',
