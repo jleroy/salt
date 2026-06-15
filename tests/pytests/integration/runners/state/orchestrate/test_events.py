@@ -18,6 +18,9 @@ import salt.utils.pycrypto
 
 log = logging.getLogger(__name__)
 
+# GitHub's macOS CI can be slow.
+pytestmark = [pytest.mark.timeout_unless_on_windows(180)]
+
 
 @attr.s(kw_only=True, slots=True)
 class TestMasterAccount:
