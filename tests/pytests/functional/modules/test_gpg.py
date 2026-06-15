@@ -1,8 +1,12 @@
+import pathlib
 import shutil
 import subprocess
+import tempfile
 
 import psutil
 import pytest
+
+import salt.utils.platform
 
 gnupglib = pytest.importorskip("gnupg", reason="Needs python-gnupg library")
 PYGNUPG_VERSION = tuple(int(x) for x in gnupglib.__version__.split("."))
@@ -45,13 +49,28 @@ def _kill_gpg_agent(root):
 
 @pytest.fixture
 def gpghome(tmp_path):
-    root = tmp_path / "gpghome"
-    root.mkdir(mode=0o0700)
+    # Socket path is tmp_path + "/gpghome/S.gpg-agent", which gives something
+    # like "/private/var/folders/_y/_[random_29_chars]/T/pytest-of-[username]/
+    # pytest-X/[test_function_name]/gpghome/S.gpg-agent" on macOS, that exceed
+    # macOS socket path 104 characters limit.
+    # Also since Mac OS X 10.2 Jaguar, usernames can be up to 255 characters
+    # long, so it's probably not a good idea to include them in socket path.
+    if salt.utils.platform.is_darwin():
+        # /private/var/folders/_y/_[random_29_chars]/T/tmp[random_8_chars]gpghome
+        root = pathlib.Path(tempfile.mkdtemp())
+        root.chmod(0o0700)
+
+    else:
+        root = tmp_path / "gpghome"
+        root.mkdir(mode=0o0700)
+
     try:
         yield root
     finally:
         # Make sure we don't leave any gpg-agents running behind
         _kill_gpg_agent(root)
+        if salt.utils.platform.is_darwin():
+            shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture
