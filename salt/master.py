@@ -1809,12 +1809,13 @@ class MWorker(salt.utils.process.SignalHandlingProcess):
     # on spawn-based platforms (Windows and macOS); on fork-based platforms
     # (Linux) they are never used.
     def __setstate__(self, state):
-        # 'object' provides '__getstate__' (since Python 3.11) but never a
-        # matching '__setstate__', so 'super().__setstate__()' raises
-        # AttributeError. This only surfaces on spawn-based platforms
-        # (macOS/Windows) where the instance is pickled to the child process.
-        # Restore the instance state by updating '__dict__' directly instead.
-        self.__dict__.update(state)
+        # Unlike SMaster (which inherits 'object'), MWorker inherits
+        # salt.utils.process.Process, whose __setstate__ rebuilds the instance
+        # by re-running __init__ (restoring opts, req_channels, key, the
+        # process internals, etc.). It MUST be invoked via super(); bypassing
+        # it leaves the process half-initialized and it dies on spawn-based
+        # platforms (macOS/Windows).
+        super().__setstate__(state)
         self.k_mtime = state["k_mtime"]
         SMaster.secrets = state["secrets"]
 
