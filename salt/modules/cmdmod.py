@@ -3461,8 +3461,16 @@ def exec_code_all(lang, code, cwd=None, args=None, **kwargs):
     """
     powershell = lang.lower().startswith("powershell")
 
+    runas = kwargs.get("runas")
+
     if powershell:
         codefile = salt.utils.files.mkstemp(suffix=".ps1")
+    elif runas is not None and salt.utils.platform.is_darwin():
+        # On macOS, mkstemp() uses ``$TMPDIR``, a user-specific directory whose
+        # parent components are mode 700 and therefore not traversable by other
+        # users accounts. When ``runas`` is specified, we save the script to
+        # the system tmp dir which can be accessed by other users accounts.
+        codefile = salt.utils.files.mkstemp(dir="/tmp")
     else:
         codefile = salt.utils.files.mkstemp()
 
@@ -3490,7 +3498,6 @@ def exec_code_all(lang, code, cwd=None, args=None, **kwargs):
                 exc_info_on_loglevel=logging.DEBUG,
             )
 
-    runas = kwargs.get("runas")
     if runas is not None:
         if not salt.utils.platform.is_windows():
             os.chown(codefile, __salt__["file.user_to_uid"](runas), -1)
