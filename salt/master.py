@@ -182,13 +182,18 @@ class SMaster:
         self.master_key = salt.crypt.MasterKeys(self.opts)
         self.key = self.__prep_key()
 
-    # We need __setstate__ and __getstate__ to also pickle 'SMaster.secrets'.
-    # Otherwise, 'SMaster.secrets' won't be copied over to the spawned process
-    # on Windows since spawning processes on Windows requires pickling.
-    # These methods are only used when pickling so will not be used on
-    # non-Windows platforms.
+    # We need __setstate__ and __getstate__ to also pickle 'SMaster.secrets'
+    # (a class attribute), which standard instance pickling would not carry
+    # over. These methods are only invoked when the instance is pickled, i.e.
+    # on spawn-based platforms (Windows and macOS); on fork-based platforms
+    # (Linux) they are never used.
     def __setstate__(self, state):
-        super().__setstate__(state)
+        # 'object' provides '__getstate__' (since Python 3.11) but never a
+        # matching '__setstate__', so 'super().__setstate__()' raises
+        # AttributeError. This only surfaces on spawn-based platforms
+        # (macOS/Windows) where the instance is pickled to the child process.
+        # Restore the instance state by updating '__dict__' directly instead.
+        self.__dict__.update(state)
         self.master_key = state["master_key"]
         self.key = state["key"]
         SMaster.secrets = state["secrets"]
@@ -1798,13 +1803,18 @@ class MWorker(salt.utils.process.SignalHandlingProcess):
         self.pool_name = pool_name or "default"
         self.pool_index = pool_index if pool_index is not None else 0
 
-    # We need __setstate__ and __getstate__ to also pickle 'SMaster.secrets'.
-    # Otherwise, 'SMaster.secrets' won't be copied over to the spawned process
-    # on Windows since spawning processes on Windows requires pickling.
-    # These methods are only used when pickling so will not be used on
-    # non-Windows platforms.
+    # We need __setstate__ and __getstate__ to also pickle 'SMaster.secrets'
+    # (a class attribute), which standard instance pickling would not carry
+    # over. These methods are only invoked when the instance is pickled, i.e.
+    # on spawn-based platforms (Windows and macOS); on fork-based platforms
+    # (Linux) they are never used.
     def __setstate__(self, state):
-        super().__setstate__(state)
+        # 'object' provides '__getstate__' (since Python 3.11) but never a
+        # matching '__setstate__', so 'super().__setstate__()' raises
+        # AttributeError. This only surfaces on spawn-based platforms
+        # (macOS/Windows) where the instance is pickled to the child process.
+        # Restore the instance state by updating '__dict__' directly instead.
+        self.__dict__.update(state)
         self.k_mtime = state["k_mtime"]
         SMaster.secrets = state["secrets"]
 
