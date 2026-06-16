@@ -150,9 +150,11 @@ def test_template_shell_default(state, state_tree, test_cmd, ret_enabled):
         test_cmd = f"'{test_cmd}'"
     else:
         test_cmd = f'"{test_cmd}"'
+    # strip() is needed because some wc versions like macOS' one pads output
+    # with spaces, unlike GNU wc.
     state_file_contents = textwrap.dedent(
         f"""
-        {{% set shell_default= salt['cmd.shell']({test_cmd}) %}}
+        {{% set shell_default= salt['cmd.shell']({test_cmd}).strip() %}}
 
         shell_default:
           test.configurable_test_state:

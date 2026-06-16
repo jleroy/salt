@@ -1,6 +1,7 @@
 import os
 import random
 import sys
+import tempfile
 
 import pytest
 
@@ -470,6 +471,12 @@ def test_cwd_runas(cmdmod, usermod, runas_usr, tmp_path):
     """
     cmd = "pwd"
     tmp_cwd = str(tmp_path)
+    # On macOS, ``tmp_path`` uses ``$TMPDIR``, a user-specific directory whose
+    # parent components are mode 700 and therefore not traversable by other
+    # users accounts. ``/tmp`` resolves to the system tmp dir and is
+    # world-readable.
+    if salt.utils.platform.is_darwin():
+        tmp_cwd = tempfile.mkdtemp(dir="/tmp")
     os.chmod(tmp_cwd, 0o711)
 
     cwd_normal = cmdmod.run_stdout(cmd, cwd=tmp_cwd).rstrip("\n")

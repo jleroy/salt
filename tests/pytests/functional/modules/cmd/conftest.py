@@ -63,7 +63,15 @@ def _posix_runas_accessible_dir() -> pathlib.Path:
     ``0o755`` allows that without opening the whole tree to world-writable
     access.
     """
-    path = pathlib.Path(tempfile.gettempdir()) / f"salt-cmd-runas-{uuid.uuid4().hex}"
+    if salt.utils.platform.is_darwin():
+        # On macOS, ``tempfile.mkdtemp()`` returns ``$TMPDIR``, a
+        # user-specific directory whose parent components are mode 700 and
+        # therefore not traversable by other accounts. ``/tmp`` resolves to the
+        # system tmp dir and is world-readable.
+        tmp_dir = tempfile.mkdtemp(dir="/tmp")
+    else:
+        tmp_dir = tempfile.mkdtemp()
+    path = pathlib.Path(tmp_dir)
     path.mkdir(parents=True)
     path.chmod(0o755)
     return path

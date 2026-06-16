@@ -13,9 +13,16 @@ def test_cmd():
     if salt.utils.platform.is_windows():
         cmd = 'whoami.exe /priv | find /c "Privilege"'
         expected = "ERROR: Invalid argument/option"
+
+    elif salt.utils.platform.is_darwin():
+        # macOS' wc one pads output with spaces, unlike GNU wc.
+        cmd = 'ls -al / | wc -l | tr -d "[:blank:]"'
+        expected = "ls: cannot access"
+
     else:
         cmd = "ls -al / | wc -l"
         expected = "ls: cannot access"
+
     return cmd, expected
 
 

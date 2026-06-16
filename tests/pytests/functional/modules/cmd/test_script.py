@@ -184,6 +184,7 @@ def test_script_args_with_space(modules, echo_script_with_space, args, expected)
     assert result["stdout"] == expected
 
 
+@pytest.mark.skip_if_not_root
 @pytest.mark.parametrize(
     "args, expected",
     [
@@ -207,6 +208,7 @@ def test_script_args_runas(modules, account, echo_script, args, expected):
     assert result["stdout"] == expected
 
 
+@pytest.mark.skip_if_not_root
 @pytest.mark.parametrize(
     "args, expected",
     [
@@ -286,6 +288,7 @@ def test_run_spaces(modules, pipe_script_with_space):
     assert result == "fine"
 
 
+@pytest.mark.skip_if_not_root
 def test_run_spaces_runas(modules, pipe_script_with_space_runas, account):
     cmd = _cmd_path_for_run(pipe_script_with_space_runas)
     result = modules.cmd.run(
