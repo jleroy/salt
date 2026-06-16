@@ -574,43 +574,53 @@ def test_shell_properly_handled_on_macOS():
         cmd_handler.cmd = " ".join(__cmd__)
         return MagicMock(return_value=MockTimedProc(stdout=None, stderr=None))
 
-    with patch("pwd.getpwnam") as getpwnam_mock:
-        with patch("salt.utils.timed_subprocess.TimedProc", mock_proc):
-
-            # User default shell is '/usr/local/bin/bash'
-            user_default_shell = "/usr/local/bin/bash"
-            with patch(
-                "pwd.getpwall",
-                Mock(
-                    return_value=[Mock(pw_shell=user_default_shell, pw_name="foobar")]
-                ),
-            ):
-                cmd_handler.clear()
-                cmdmod._run(
-                    "ls", cwd=tempfile.gettempdir(), runas="foobar", use_vt=False
+    with patch("salt.utils.timed_subprocess.TimedProc", mock_proc):
+        # User default shell is '/usr/local/bin/bash'
+        user_default_shell = "/usr/local/bin/bash"
+        with patch(
+            "pwd.getpwnam",
+            Mock(
+                return_value=Mock(
+                    pw_shell=user_default_shell,
+                    pw_name="foobar",
                 )
+            ),
+        ):
+            cmd_handler.clear()
+            cmdmod._run(
+                "ls",
+                cwd=tempfile.gettempdir(),
+                runas="foobar",
+                use_vt=False,
+            )
 
-                assert re.search(
-                    f"{user_default_shell} -l -c", cmd_handler.cmd
-                ), "cmd invokes right bash session on macOS"
+            assert re.search(
+                f"{user_default_shell} -l -c", cmd_handler.cmd
+            ), "cmd invokes right bash session on macOS"
 
-            # User default shell is '/bin/zsh'
-            user_default_shell = "/bin/zsh"
-            with patch(
-                "pwd.getpwall",
-                Mock(
-                    return_value=[Mock(pw_shell=user_default_shell, pw_name="foobar")]
+        # User default shell is '/bin/zsh'
+        user_default_shell = "/bin/zsh"
+        with patch(
+            "pwd.getpwnam",
+            Mock(
+                return_value=Mock(
+                    pw_shell=user_default_shell,
+                    pw_name="foobar",
                 ),
-            ):
+            ),
+        ):
+            cmd_handler.clear()
+            cmdmod._run(
+                "ls",
+                cwd=tempfile.gettempdir(),
+                runas="foobar",
+                use_vt=False,
+            )
 
-                cmd_handler.clear()
-                cmdmod._run(
-                    "ls", cwd=tempfile.gettempdir(), runas="foobar", use_vt=False
-                )
-
-                assert not re.search(
-                    "bash -l -c", cmd_handler.cmd
-                ), "cmd does not invoke user shell on macOS"
+            assert not re.search(
+                "bash -l -c",
+                cmd_handler.cmd,
+            ), "cmd does not invoke user shell on macOS"
 
 
 @pytest.mark.skip_on_windows
