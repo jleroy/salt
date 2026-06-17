@@ -3072,7 +3072,17 @@ def script(
         }
         shell = extension_map.get(ext)
 
-    path = salt.utils.files.mkstemp(dir=cwd, suffix=ext)
+    # When running as a different user on macOS, the script cannot live in the
+    # default temp directory: ``$TMPDIR`` is a per-user, mode-0700 directory, so
+    # even after chowning the file the target user cannot traverse the parent
+    # directory. Fall back to a world-traversable location, unless an explicit
+    # ``cwd`` was provided. Only the script file location changes here; the
+    # ``cwd`` passed to ``_run`` below is left untouched.
+    script_dir = cwd
+    if script_dir is None and runas is not None and salt.utils.platform.is_darwin():
+        script_dir = "/tmp"
+
+    path = salt.utils.files.mkstemp(dir=script_dir, suffix=ext)
 
     if template:
         if "pillarenv" in kwargs or "pillar" in kwargs:
