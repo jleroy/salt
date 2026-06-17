@@ -476,7 +476,7 @@ def test_cwd_runas(cmdmod, usermod, runas_usr, tmp_path):
     # users accounts. ``/tmp`` resolves to the system tmp dir and is
     # world-readable.
     if salt.utils.platform.is_darwin():
-        tmp_cwd = tempfile.mkdtemp(dir="/tmp")
+        tmp_cwd = os.path.realpath(tempfile.mkdtemp(dir="/tmp"))
     os.chmod(tmp_cwd, 0o711)
 
     cwd_normal = cmdmod.run_stdout(cmd, cwd=tmp_cwd).rstrip("\n")
