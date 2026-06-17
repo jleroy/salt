@@ -1346,12 +1346,12 @@ class ZeroMQSocketMonitor:
             return
         try:
             self._socket.disable_monitor()
-        except zmq.Error:
+        except zmq.ZMQError:
             pass
         if self._monitor_socket is not None:
             try:
                 self._monitor_socket.close(0)
-            except zmq.Error:
+            except zmq.ZMQError:
                 pass
         self._socket = None
         self._running.clear()
