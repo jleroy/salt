@@ -859,13 +859,14 @@ jobs:
           brew install tree
 
       - name: Make Hostname Resolvable
-        # macOS resolves the runner's *.local hostname via mDNS, which times
-        # out (~30s) inside getaddrinfo when the master 'ip_fqdn' grain is
-        # rendered on every MasterMinion/AESFuncs construction. Map it in
-        # /etc/hosts so getaddrinfo returns immediately.
+        # The runner already maps its hostname to its public IPv4 in /etc/hosts
+        # but has no IPv6 entry. The master 'ip_fqdn' grain resolves both AF_INET
+        # and AF_INET6; the missing IPv6 record sends the AF_INET6 lookup to mDNS,
+        # which hangs ~30s on the *.local name. Map the hostname to the IPv6
+        # loopback so that lookup returns immediately.
         run: |
           # sudo doesn't affect redirects, so we use ... | sudo tee
-          echo "127.0.0.1 $(hostname -f)" | sudo tee -a /etc/hosts > /dev/null
+          echo "# Added by Salt CI" | sudo tee -a /etc/hosts > /dev/null
           echo "::1 $(hostname -f)" | sudo tee -a /etc/hosts > /dev/null
           echo "=== BEGIN /etc/hosts ==="
           cat /etc/hosts
