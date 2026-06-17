@@ -2,6 +2,7 @@
 # pylint: disable=redefined-outer-name,invalid-name,3rd-party-module-not-gated
 
 
+import faulthandler
 import logging
 import os
 import pathlib
@@ -1460,6 +1461,17 @@ def salt_call_cli(salt_minion_factory):
 def pytest_sessionstart(session):
     # Belt-and-suspenders if anything reintroduced vault.py after process start
     _remove_redundant_salt_utils_vault_py()
+
+
+def pytest_sessionfinish(session):
+    # On spawn platforms (notably macOS) the test process has occasionally hung
+    # during interpreter shutdown *after* the run completed -- a leaked thread,
+    # zmq socket or unjoined child blocking exit -- producing no output and
+    # burning the whole CI timeout. Arm a watchdog: if the process has not
+    # exited within a couple of minutes of the session finishing, dump every
+    # thread's stack and abort, so the hang is diagnosable instead of silent.
+    # On a healthy shutdown the process exits first and the timer never fires.
+    faulthandler.dump_traceback_later(120, exit=True)
 
 
 @pytest.fixture(scope="session", autouse=True)
