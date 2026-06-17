@@ -5,7 +5,6 @@ import logging
 import os
 import pathlib
 import signal
-import tempfile
 import time
 import uuid
 
@@ -19,7 +18,6 @@ import salt.modules.test as test_mod
 import salt.syspaths
 import salt.utils.crypt
 import salt.utils.jid
-import salt.utils.platform
 import salt.utils.process
 from salt._compat import ipaddress
 from salt.exceptions import (
@@ -1693,26 +1691,13 @@ async def test_connect_master_general_exception_error(minion_opts, connect_maste
     assert minion.connect_master.calls == 2
 
 
-async def test_minion_manager_async_stop(io_loop, minion_opts, tmp_path):
+async def test_minion_manager_async_stop(io_loop, minion_opts, socket_tmp_path):
     """
     Ensure MinionManager's stop method works correctly and calls the
     stop_async method
     """
 
-    # Socket path is tmp_path + "/sock/minion_event_[hash]_pub.ipc", which
-    # gives something like "/private/var/folders/_y/_[random_29_chars]/T/
-    # pytest-of-[username]/pytest-X/[test_function_name]/sock/
-    # minion_event_[hash]_pub.ipc" on macOS, that exceed macOS socket path 104
-    # characters limit.
-    # Also since Mac OS X 10.2 Jaguar, usernames can be up to 255 characters
-    # long, so it's probably not a good idea to include them in socket path.
-    if salt.utils.platform.is_darwin():
-        # /private/var/folders/_y/_[random_29_chars]/T/tmp[random_8_chars]
-        minion_opts["sock_dir"] = tempfile.mkdtemp()
-
-    else:
-        minion_opts["sock_dir"] = str(tmp_path / "sock")
-        os.makedirs(minion_opts["sock_dir"])
+    minion_opts["sock_dir"] = str(socket_tmp_path)
 
     # Create a MinionManager instance with a mock minion
     mm = salt.minion.MinionManager(minion_opts)

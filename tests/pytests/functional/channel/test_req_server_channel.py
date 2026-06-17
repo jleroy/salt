@@ -14,7 +14,6 @@ import logging
 import multiprocessing
 import os
 import pathlib
-import tempfile
 import time
 
 import pytest
@@ -28,24 +27,12 @@ log = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def req_server_opts(tmp_path):
+def req_server_opts(tmp_path, socket_tmp_path):
     """
     Minimal master opts dict sufficient to build a
     :class:`ReqServerChannel` without a running master.
     """
-    # Socket path is tmp_path + "/sock/workers.ipc", which gives something like
-    # "/private/var/folders/_y/_[random_29_chars]/T/pytest-of-[username]/
-    # pytest-14/[test_function_name]/sock/workers.ipc" on macOS, that exceed
-    # macOS socket path 104 characters limit.
-    # Also since Mac OS X 10.2 Jaguar, usernames can be up to 255 characters
-    # long, so it's probably not a good idea to include them in socket path.
-    if salt.utils.platform.is_darwin():
-        # /private/var/folders/_y/_[random_29_chars]/T/tmp[random_8_chars]
-        sock_dir = tempfile.mkdtemp()
-
-    else:
-        sock_dir = tmp_path / "sock"
-        sock_dir.mkdir()
+    sock_dir = socket_tmp_path
 
     pki_dir = tmp_path / "pki"
     cache_dir = tmp_path / "cache"

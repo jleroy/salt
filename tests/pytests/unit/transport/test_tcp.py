@@ -969,11 +969,13 @@ async def test_pub_server_paths_no_perms(master_opts, io_loop):
 
 
 @pytest.mark.skip_on_windows()
-async def test_pub_server_publisher_pull_path_perms(master_opts, io_loop, tmp_path):
+async def test_pub_server_publisher_pull_path_perms(
+    master_opts, io_loop, socket_tmp_path
+):
     def publish_payload(payload):
         return payload
 
-    pull_path = str(tmp_path / "pull.ipc")
+    pull_path = str(socket_tmp_path / "pull.ipc")
     pull_path_perms = 0o664
     pubserv = salt.transport.tcp.PublishServer(
         master_opts,
@@ -995,11 +997,13 @@ async def test_pub_server_publisher_pull_path_perms(master_opts, io_loop, tmp_pa
 
 
 @pytest.mark.skip_on_windows()
-async def test_pub_server_publisher_pub_path_perms(master_opts, io_loop, tmp_path):
+async def test_pub_server_publisher_pub_path_perms(
+    master_opts, io_loop, socket_tmp_path
+):
     def publish_payload(payload):
         return payload
 
-    pub_path = str(tmp_path / "pub.ipc")
+    pub_path = str(socket_tmp_path / "pub.ipc")
     pub_path_perms = 0o664
     pubserv = salt.transport.tcp.PublishServer(
         master_opts,
