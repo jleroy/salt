@@ -72,7 +72,6 @@ def _posix_runas_accessible_dir() -> pathlib.Path:
     else:
         tmp_dir = tempfile.mkdtemp()
     path = pathlib.Path(tmp_dir)
-    path.mkdir(parents=True)
     path.chmod(0o755)
     return path
 
