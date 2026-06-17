@@ -1,3 +1,4 @@
+import errno
 import sys
 import urllib
 
@@ -158,7 +159,8 @@ def test_query_null_response():
     if sys.platform.startswith("win"):
         assert result == {"error": "[Errno 10061] Unknown error"}, result
     else:
-        assert result == {"error": "[Errno 111] Connection refused"}
+        # errno.ECONNREFUSED is 111 on Linux but 61 on macOS/BSD.
+        assert result == {"error": f"[Errno {errno.ECONNREFUSED}] Connection refused"}
 
 
 def test_query_error_handling():
