@@ -864,8 +864,12 @@ jobs:
         # rendered on every MasterMinion/AESFuncs construction. Map it in
         # /etc/hosts so getaddrinfo returns immediately.
         run: |
-          sudo echo "127.0.0.1 $(hostname -f)" >> /etc/hosts
-          sudo echo "::1 $(hostname -f)" >> /etc/hosts
+          # sudo doesn't affect redirects, so we use ... | sudo tee
+          echo "127.0.0.1 $(hostname -f)" | sudo tee -a /etc/hosts > /dev/null
+          echo "::1 $(hostname -f)" | sudo tee -a /etc/hosts > /dev/null
+          echo "=== BEGIN /etc/hosts ==="
+          cat /etc/hosts
+          echo "=== END /etc/hosts ==="
 
       - name: Download nox.macos.${{ matrix.arch }}.tar.* artifact for session ${{ inputs.nox-session }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
