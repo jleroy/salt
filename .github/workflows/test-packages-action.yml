@@ -264,8 +264,8 @@ jobs:
         # rendered on every MasterMinion/AESFuncs construction. Map it in
         # /etc/hosts so getaddrinfo returns immediately.
         run: |
-          echo "127.0.0.1 $(hostname -f)" >> /etc/hosts
-          echo "::1 $(hostname -f)" >> /etc/hosts
+          sudo echo "127.0.0.1 $(hostname -f)" >> /etc/hosts
+          sudo echo "::1 $(hostname -f)" >> /etc/hosts
 
       - name: List Packages
         run: |
