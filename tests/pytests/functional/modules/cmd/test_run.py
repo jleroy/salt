@@ -17,7 +17,9 @@ def test_cmd():
     elif salt.utils.platform.is_darwin():
         # macOS' wc one pads output with spaces, unlike GNU wc.
         cmd = 'ls -al / | wc -l | tr -d "[:blank:]"'
-        expected = "ls: cannot access"
+        # BSD ls reports "ls: <name>: No such file or directory" rather than
+        # GNU's "ls: cannot access ...".
+        expected = "No such file or directory"
 
     else:
         cmd = "ls -al / | wc -l"
