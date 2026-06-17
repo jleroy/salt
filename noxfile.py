@@ -1541,16 +1541,26 @@ class Tee:
 
 def _lint(session, rcfile, flags, paths, upgrade_setuptools_and_pip=True):
     if _upgrade_pip_setuptools_and_wheel(session, upgrade=upgrade_setuptools_and_pip):
-        linux_requirements_file = os.path.join(
-            "requirements", "static", "ci", _get_pydir(session), "linux.lock"
-        )
+        requirements_file = _get_pip_requirements_file(session)
+        # The lint requirements are compiled per-platform: the lock pins
+        # platform specific packages (e.g. Linux-only pyinotify/pyiface) without
+        # environment markers, so the matching platform lock must be used.
+        if IS_LINUX:
+            lint_lock_name = "lint-linux.lock"
+        elif IS_DARWIN:
+            lint_lock_name = "lint-darwin.lock"
+        else:
+            session.error(
+                "There is no lint requirements lock file for the current "
+                f"platform ({sys.platform})"
+            )
         lint_requirements_file = os.path.join(
-            "requirements", "static", "ci", _get_pydir(session), "lint.lock"
+            "requirements", "static", "ci", _get_pydir(session), lint_lock_name
         )
         install_command = [
             "--progress-bar=off",
             "-r",
-            linux_requirements_file,
+            requirements_file,
             "-r",
             lint_requirements_file,
         ]

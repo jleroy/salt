@@ -1853,8 +1853,8 @@ repos:
   # ----- Lint CI Requirements -------------------------------------------------------------------------------------->
 
       - id: pip-compile
-        alias: compile-ci-lint-3.9-requirements
-        name: Lint CI Py3.9 Requirements
+        alias: compile-ci-lint-linux-3.9-requirements
+        name: Lint CI Linux Py3.9 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.9/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1873,11 +1873,11 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.9/linux.lock
           - -c=requirements/static/pkg/py3.9/linux.lock
-          - -o=requirements/static/ci/py3.9/lint.lock
+          - -o=requirements/static/ci/py3.9/lint-linux.lock
 
       - id: pip-compile
-        alias: compile-ci-lint-3.10-requirements
-        name: Lint CI Py3.10 Requirements
+        alias: compile-ci-lint-linux-3.10-requirements
+        name: Lint CI Linux Py3.10 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.10/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1896,11 +1896,11 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.10/linux.lock
           - -c=requirements/static/pkg/py3.10/linux.lock
-          - -o=requirements/static/ci/py3.10/lint.lock
+          - -o=requirements/static/ci/py3.10/lint-linux.lock
 
       - id: pip-compile
-        alias: compile-ci-lint-3.11-requirements
-        name: Lint CI Py3.11 Requirements
+        alias: compile-ci-lint-linux-3.11-requirements
+        name: Lint CI Linux Py3.11 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.11/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1919,11 +1919,11 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.11/linux.lock
           - -c=requirements/static/pkg/py3.11/linux.lock
-          - -o=requirements/static/ci/py3.11/lint.lock
+          - -o=requirements/static/ci/py3.11/lint-linux.lock
 
       - id: pip-compile
-        alias: compile-ci-lint-3.12-requirements
-        name: Lint CI Py3.12 Requirements
+        alias: compile-ci-lint-linux-3.12-requirements
+        name: Lint CI Linux Py3.12 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.12/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1942,12 +1942,12 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.12/linux.lock
           - -c=requirements/static/pkg/py3.12/linux.lock
-          - -o=requirements/static/ci/py3.12/lint.lock
+          - -o=requirements/static/ci/py3.12/lint-linux.lock
 
 
       - id: pip-compile
-        alias: compile-ci-lint-3.13-requirements
-        name: Lint CI Py3.13 Requirements
+        alias: compile-ci-lint-linux-3.13-requirements
+        name: Lint CI Linux Py3.13 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.13/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1966,14 +1966,11 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.13/linux.lock
           - -c=requirements/static/pkg/py3.13/linux.lock
-          - -o=requirements/static/ci/py3.13/lint.lock
+          - -o=requirements/static/ci/py3.13/lint-linux.lock
 
-  # <---- Lint CI Requirements ---------------------------------------------------------------------------------------
-
-  # ----- Changelog ------------------------------------------------------------------------------------------------->
       - id: pip-compile
-        alias: compile-ci-lint-3.14-requirements
-        name: Lint CI Py3.14 Requirements
+        alias: compile-ci-lint-linux-3.14-requirements
+        name: Lint CI Linux Py3.14 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.14/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1992,7 +1989,145 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.14/linux.lock
           - -c=requirements/static/pkg/py3.14/linux.lock
-          - -o=requirements/static/ci/py3.14/lint.lock
+          - -o=requirements/static/ci/py3.14/lint-linux.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.9-requirements
+        name: Lint CI Darwin Py3.9 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.9/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.9
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.9/darwin.lock
+          - -c=requirements/static/pkg/py3.9/darwin.lock
+          - -o=requirements/static/ci/py3.9/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.10-requirements
+        name: Lint CI Darwin Py3.10 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.10/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.10
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.10/darwin.lock
+          - -c=requirements/static/pkg/py3.10/darwin.lock
+          - -o=requirements/static/ci/py3.10/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.11-requirements
+        name: Lint CI Darwin Py3.11 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.11/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.11
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.11/darwin.lock
+          - -c=requirements/static/pkg/py3.11/darwin.lock
+          - -o=requirements/static/ci/py3.11/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.12-requirements
+        name: Lint CI Darwin Py3.12 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.12/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.12
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.12/darwin.lock
+          - -c=requirements/static/pkg/py3.12/darwin.lock
+          - -o=requirements/static/ci/py3.12/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.13-requirements
+        name: Lint CI Darwin Py3.13 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.13/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.13
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.13/darwin.lock
+          - -c=requirements/static/pkg/py3.13/darwin.lock
+          - -o=requirements/static/ci/py3.13/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.14-requirements
+        name: Lint CI Darwin Py3.14 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.14/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.14/darwin.lock
+          - -c=requirements/static/pkg/py3.14/darwin.lock
+          - -o=requirements/static/ci/py3.14/lint-darwin.lock
 
   # <---- Lint CI Requirements ---------------------------------------------------------------------------------------
 
