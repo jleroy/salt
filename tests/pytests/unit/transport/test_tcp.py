@@ -104,6 +104,8 @@ def test_get_socket():
 
     if salt.utils.platform.is_windows():
         assert int(socket.family) == 23
+    elif salt.utils.platform.is_darwin():
+        assert int(socket.family) == 30
     else:
         assert int(socket.family) == 10
 
