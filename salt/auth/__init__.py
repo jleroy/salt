@@ -253,7 +253,9 @@ class LoadAuth:
             new_token = str(hash_type(os.urandom(512)).hexdigest())
             tdata["token"] = new_token
             try:
-                self.cache.store("tokens", new_token, tdata, expires=tdata["expire"])
+                # ``Cache.store`` expects ``expires`` as seconds-from-now, not an
+                # absolute timestamp; ``tdata["expire"]`` is absolute.
+                self.cache.store("tokens", new_token, tdata, expires=token_expire)
             except salt.exceptions.SaltCacheError as err:
                 log.error(
                     "Cannot mk_token from tokens cache using %s: %s",
