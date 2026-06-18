@@ -395,6 +395,37 @@ def test_service_restart_failed_start():
             assert mac_service.restart("com.salt")
 
 
+def test_service_start_already_loaded():
+    """
+    Test service.start when the service is already loaded.
+    Must not try to bootstrap it again as it fail on recent macOS versions.
+    """
+    domain_ret = MagicMock(return_value=("system", "/path/to/com.salt.plist"))
+    launchctl_mock = MagicMock(return_value=True)
+    salt_dict = {"service.loaded": MagicMock(return_value=True)}
+    with patch.object(mac_service, "_get_domain_target", domain_ret):
+        with patch.object(mac_service, "launchctl", launchctl_mock):
+            with patch.dict(mac_service.__salt__, salt_dict):
+                assert mac_service.start("com.salt") is True
+    launchctl_mock.assert_not_called()
+
+
+def test_service_start_not_loaded():
+    """
+    Test service.start bootstraps the service when it is not already loaded.
+    """
+    domain_ret = MagicMock(return_value=("system", "/path/to/com.salt.plist"))
+    launchctl_mock = MagicMock(return_value=True)
+    salt_dict = {"service.loaded": MagicMock(return_value=False)}
+    with patch.object(mac_service, "_get_domain_target", domain_ret):
+        with patch.object(mac_service, "launchctl", launchctl_mock):
+            with patch.dict(mac_service.__salt__, salt_dict):
+                assert mac_service.start("com.salt") is True
+    launchctl_mock.assert_called_once_with(
+        "bootstrap", "system", "/path/to/com.salt.plist", runas=None
+    )
+
+
 def test_service_status_no_service():
     """
     Test service status with no service found
