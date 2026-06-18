@@ -8,7 +8,22 @@ from saltfactories.utils import random_string
 
 import salt.utils.files
 import salt.utils.user
+import salt.utils.verify
 from tests.conftest import FIPS_TESTRUN
+
+
+def _traversable_by_others():
+    """
+    A minion configured to run as a non-root user must be able to traverse its
+    install tree to lazily import modules (e.g. salt.transport.tcp) after
+    dropping privileges. Since that user neither owns nor shares a group with
+    the files, only the "other" execute bits matter. This is not the case for
+    the onedir layout living under the CI runner home.
+    """
+    return all(
+        os.stat(parent).st_mode & 0o001
+        for parent in salt.utils.verify.list_path_traversal(os.path.dirname(__file__))
+    )
 
 
 @pytest.fixture(scope="module")
@@ -50,6 +65,13 @@ def non_root_minion(salt_master, salt_factories):
 
     if not non_root_user:
         pytest.skip("No suitable non-root user found for testing")
+
+    if not _traversable_by_others():
+        pytest.skip(
+            "Salt install tree is not traversable by non-root users "
+            "(typical of the onedir layout under the CI runner home); "
+            f"a minion running as {non_root_user!r} cannot start here."
+        )
 
     config_overrides = {
         "user": non_root_user,
