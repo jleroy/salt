@@ -16,6 +16,7 @@ import os
 import os.path
 import shutil
 import tempfile
+import time
 
 import salt.payload
 import salt.utils.atomicfile
@@ -110,6 +111,35 @@ def updated(bank, key, cachedir):
         raise SaltCacheError(
             f'There was an error reading the mtime for "{key_file}": {exc}'
         )
+
+
+def clean_expired(bank, cachedir, **kwargs):
+    """
+    Remove expired entries from the cache bank.
+
+    ``salt.cache.Cache`` stores entries that carry an expiration as a
+    ``{"data": ..., "_expires": <epoch>}`` wrapper (see ``Cache.store``/
+    ``Cache.fetch``). Remove the entries whose ``_expires`` timestamp is in the
+    past; entries without that wrapper carry no expiration and are left
+    untouched.
+
+    Without this, ``salt.cache.Cache.clean_expired`` falls back to comparing the
+    file mtime (always in the past), which would delete every entry regardless
+    of its real expiration -- silently dropping still-valid auth tokens.
+    """
+    now = time.time()
+    for key in list_(bank, cachedir):
+        try:
+            data = fetch(bank, key, cachedir)
+        except SaltCacheError:
+            # Unreadable entry: leave it rather than risk deleting good data.
+            continue
+        if (
+            isinstance(data, dict)
+            and set(data) == {"data", "_expires"}
+            and data["_expires"] <= now
+        ):
+            flush(bank, key, cachedir)
 
 
 def flush(bank, key=None, cachedir=None):
