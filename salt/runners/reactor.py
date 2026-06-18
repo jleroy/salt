@@ -135,6 +135,39 @@ def delete(event, saltenv="base", test=None):
         return res.get("result")
 
 
+def _request_leader_value(payload, request_tag, attempts=3, wait=8):
+    """
+    Send a reactor management request and return the leader value reported back
+    by the reactor engine.
+
+    The first request can be lost to a slow-joiner race: the event subscriber
+    may not be fully connected by the time the reactor engine fires its reply.
+    To stay robust, the request is re-sent until a response is received (re-
+    firing is harmless: ``is_leader`` is read-only and ``set_leader`` is
+    idempotent). A clear error is raised if no response arrives, instead of
+    crashing on a ``None`` result.
+    """
+    with salt.utils.event.get_event(
+        "master",
+        __opts__["sock_dir"],
+        opts=__opts__,
+        listen=True,
+    ) as sevent:
+
+        payload = dict(payload)
+        payload["key"] = salt.utils.master.get_master_key("root", __opts__)
+
+        for _ in range(attempts):
+            __jid_event__.fire_event(payload, request_tag)
+            res = sevent.get_event(wait=wait, tag="salt/reactors/manage/leader/value")
+            if res is not None:
+                return res["result"]
+
+        raise CommandExecutionError(
+            "Timed out waiting for the reactor system to report the leader value."
+        )
+
+
 def is_leader():
     """
     Return whether the running reactor is acting as a leader (responding to events).
@@ -148,19 +181,7 @@ def is_leader():
     if not _reactor_system_available():
         raise CommandExecutionError("Reactor system is not running.")
 
-    with salt.utils.event.get_event(
-        "master",
-        __opts__["sock_dir"],
-        opts=__opts__,
-        listen=True,
-    ) as sevent:
-
-        master_key = salt.utils.master.get_master_key("root", __opts__)
-
-        __jid_event__.fire_event({"key": master_key}, "salt/reactors/manage/is_leader")
-
-        res = sevent.get_event(wait=30, tag="salt/reactors/manage/leader/value")
-        return res["result"]
+    return _request_leader_value({}, "salt/reactors/manage/is_leader")
 
 
 def set_leader(value=True):
@@ -176,19 +197,7 @@ def set_leader(value=True):
     if not _reactor_system_available():
         raise CommandExecutionError("Reactor system is not running.")
 
-    with salt.utils.event.get_event(
-        "master",
-        __opts__["sock_dir"],
-        opts=__opts__,
-        listen=True,
-    ) as sevent:
-
-        master_key = salt.utils.master.get_master_key("root", __opts__)
-
-        __jid_event__.fire_event(
-            {"id": __opts__["id"], "value": value, "key": master_key},
-            "salt/reactors/manage/set_leader",
-        )
-
-        res = sevent.get_event(wait=30, tag="salt/reactors/manage/leader/value")
-        return res["result"]
+    return _request_leader_value(
+        {"id": __opts__["id"], "value": value},
+        "salt/reactors/manage/set_leader",
+    )
