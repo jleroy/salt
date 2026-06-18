@@ -104,7 +104,7 @@ def test_reactor_reaction(
 
 
 @pytest.mark.skip_on_windows(reason=PRE_PYTEST_SKIP_REASON)
-@pytest.mark.timeout_unless_on_windows(120)
+@pytest.mark.timeout_unless_on_windows(180)
 def test_reactor_is_leader(
     event_listener,
     salt_master,
@@ -164,20 +164,27 @@ def test_reactor_is_leader(
 
     # Now, with the temp config in place, ensure the reactor engine is running
     with pytest.helpers.temp_file("reactor-test.conf", config_overrides, confd_dir):
-        ret = salt_run_cli.run("reactor.set_leader", value=True)
+        # The reactor engine services these management requests on a single
+        # threaded event loop. Under CI load it can take a while to reply, and
+        # the runner keeps re-requesting for up to 60s, so raise the subprocess
+        # timeout above that budget to avoid flaky failures.
+        def run_reactor(*args, **kwargs):
+            return salt_run_cli.run(*args, _timeout=90, **kwargs)
+
+        ret = run_reactor("reactor.set_leader", value=True)
         assert ret.returncode == 0
         assert (
             "CommandExecutionError" not in ret.stdout
         ), "reactor engine is not running"
 
-        ret = salt_run_cli.run("reactor.is_leader")
+        ret = run_reactor("reactor.is_leader")
         assert ret.returncode == 0
         assert ret.stdout.rstrip().splitlines()[-1] == "true"
 
-        ret = salt_run_cli.run("reactor.set_leader", value=False)
+        ret = run_reactor("reactor.set_leader", value=False)
         assert ret.returncode == 0
 
-        ret = salt_run_cli.run("reactor.is_leader")
+        ret = run_reactor("reactor.is_leader")
         assert ret.returncode == 0
         assert ret.stdout.rstrip().splitlines()[-1] == "false"
 
@@ -200,9 +207,9 @@ def test_reactor_is_leader(
         assert matched_events.found_all_events is not True
 
         # make reactor the leader again; ensure reactor engine is available
-        ret = salt_run_cli.run("reactor.set_leader", value=True)
+        ret = run_reactor("reactor.set_leader", value=True)
         assert ret.returncode == 0
-        ret = salt_run_cli.run("reactor.is_leader")
+        ret = run_reactor("reactor.is_leader")
         assert ret.returncode == 0
         assert ret.stdout.rstrip().splitlines()[-1] == "true"
 
