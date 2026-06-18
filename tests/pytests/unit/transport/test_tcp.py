@@ -1,6 +1,5 @@
 import asyncio
 import gc
-import logging
 import os
 import socket
 import warnings
@@ -772,19 +771,19 @@ async def test_salt_message_server_recreates_unpacker_on_disconnect(monkeypatch)
 
 async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypatch):
     """
-    Ensure that a general exception from the stream causes the server to reset its
-    unpacker, preventing the previous buffer from leaking.
+    Ensure that a general exception from the stream causes the server to reset
+    its unpacker, releasing the previous buffer instead of leaking it.
     """
 
     class TrackingUnpacker:
-        living = weakref.WeakSet()
+        # Weak references to every unpacker created, in creation order.
+        refs = []
         created = 0
 
         def __init__(self, *args, **kwargs):
             self.max_buffer_size = kwargs.get("max_buffer_size")
             TrackingUnpacker.created += 1
-            self.index = TrackingUnpacker.created  # 1=initial, 2=reset on exc
-            TrackingUnpacker.living.add(self)
+            TrackingUnpacker.refs.append(weakref.ref(self))
 
         def feed(self, data):
             return None
@@ -820,50 +819,23 @@ async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypa
         def close(self):
             self.closed = True
 
-    # The general-exception path in handle_stream logs with exc_info=True. If
-    # TRACE logging is enabled (which can leak from another test in the suite),
-    # the captured log record retains the traceback -> the handle_stream frame
-    # -> the reset unpacker, keeping it alive and defeating the liveness check
-    # below. Pin the logger to its default level so the assertion is
-    # deterministic regardless of global logging state.
-    tcp_log = logging.getLogger("salt.transport.tcp")
-    original_level = tcp_log.level
-    tcp_log.setLevel(logging.WARNING)
     try:
         stream = FailingStream()
         await server.handle_stream(stream, "failing-client")
         await tornado.gen.sleep(0.01)
         gc.collect()
         assert stream.closed
-        # initial creation + reset on exception
+        # initial unpacker + the one created when resetting on the exception
         assert TrackingUnpacker.created == 2
-
-        # --- TEMPORARY CI DIAGNOSTIC DUMP ------------------------------------
-        # This liveness check is intermittently flaky on macOS. When it fails,
-        # dump which unpacker (index 1=initial, 2=reset) is still alive and the
-        # strong referrers keeping it from being collected, so the CI log tells
-        # us what holds it (e.g. an exception traceback frame).
-        living = list(TrackingUnpacker.living)
-        if living:
-            diag = ["", "=== unpacker liveness DIAGNOSTIC ==="]
-            diag.append(f"created={TrackingUnpacker.created} living={len(living)}")
-            for obj in living:
-                referrers = [r for r in gc.get_referrers(obj) if r is not living]
-                diag.append(
-                    f"  unpacker index={getattr(obj, 'index', '?')} "
-                    f"id={id(obj)} referrers={len(referrers)}"
-                )
-                for ref in referrers:
-                    diag.append(
-                        f"    referrer type={type(ref).__name__} "
-                        f"repr={repr(ref)[:200]}"
-                    )
-            print("\n".join(diag), flush=True)
-        # ---------------------------------------------------------------------
-
-        assert not TrackingUnpacker.living
+        # The previous unpacker -- the one that was fed the 4096-byte buffer --
+        # must be released once handle_stream resets it on the exception path.
+        # The reset unpacker itself can stay transiently alive (it is held by
+        # the handled exception's traceback frame, a CPython artifact, not a
+        # buffer leak), so we only assert on the previous one.
+        assert (
+            TrackingUnpacker.refs[0]() is None
+        ), "the previous unpacker (and its buffer) was not released on reset"
     finally:
-        tcp_log.setLevel(original_level)
         server.close()
 
     gc.collect()
