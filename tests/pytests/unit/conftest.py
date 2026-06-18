@@ -1,3 +1,4 @@
+import logging
 import os
 
 import pytest
@@ -6,6 +7,23 @@ import salt.config
 import salt.transport.tcp
 from tests.conftest import FIPS_TESTRUN
 from tests.support.mock import AsyncMock, MagicMock, patch
+
+
+@pytest.fixture(autouse=True)
+def _reset_logging_disable():
+    """
+    Neutralize a global ``logging.disable()`` level leaked by another test.
+
+    ``logging.disable()`` sets a process-wide threshold (``manager.disable``)
+    shared by every test. If a test run before this one leaves it at a level
+    >= the level a ``caplog`` assertion expects (e.g. the custom ``TRACE``
+    level used by salt), the matching records are dropped before reaching
+    caplog's handler and ``caplog.messages`` comes back empty. This made
+    caplog-based tests such as ``test__clean_value_uuid`` flaky in the full
+    suite while passing in isolation. Reset it before every unit test.
+    """
+    logging.disable(logging.NOTSET)
+    yield
 
 
 @pytest.fixture

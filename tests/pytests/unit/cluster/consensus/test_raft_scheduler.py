@@ -32,7 +32,12 @@ def threaded_scheduler():
 def test_threaded_timeout_scheduler(threaded_scheduler):
     moc = Mock()
     threaded_scheduler.schedule(0.01, moc)
-    time.sleep(0.021)
+    # Poll until the callback fires instead of relying on a fixed sleep, which
+    # is racy on a loaded CI host where the daemon thread may not be scheduled
+    # within a short fixed window.
+    deadline = time.monotonic() + 5
+    while not moc.called and time.monotonic() < deadline:
+        time.sleep(0.01)
     moc.assert_called_once()
 
 
@@ -125,7 +130,12 @@ def test_threaded_scheduler_exception_in_callback_is_caught():
             raise RuntimeError("boom in callback")
 
         scheduler.schedule(0.001, bad_callback)
-        time.sleep(0.05)
+        # Poll until the callback fires instead of relying on a fixed sleep,
+        # which is racy on a loaded CI host where the daemon thread may not be
+        # scheduled within a short fixed window.
+        deadline = time.monotonic() + 5
+        while not called and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert called, "bad_callback must have been called"
         # Thread must still be alive after the exception
         assert scheduler._thread.is_alive()

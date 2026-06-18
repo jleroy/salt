@@ -1,5 +1,6 @@
 import asyncio
 import gc
+import logging
 import os
 import socket
 import warnings
@@ -818,6 +819,15 @@ async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypa
         def close(self):
             self.closed = True
 
+    # The general-exception path in handle_stream logs with exc_info=True. If
+    # TRACE logging is enabled (which can leak from another test in the suite),
+    # the captured log record retains the traceback -> the handle_stream frame
+    # -> the reset unpacker, keeping it alive and defeating the liveness check
+    # below. Pin the logger to its default level so the assertion is
+    # deterministic regardless of global logging state.
+    tcp_log = logging.getLogger("salt.transport.tcp")
+    original_level = tcp_log.level
+    tcp_log.setLevel(logging.WARNING)
     try:
         stream = FailingStream()
         await server.handle_stream(stream, "failing-client")
@@ -828,6 +838,7 @@ async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypa
         assert TrackingUnpacker.created == 2
         assert not TrackingUnpacker.living
     finally:
+        tcp_log.setLevel(original_level)
         server.close()
 
     gc.collect()
