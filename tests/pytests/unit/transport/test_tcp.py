@@ -783,6 +783,7 @@ async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypa
         def __init__(self, *args, **kwargs):
             self.max_buffer_size = kwargs.get("max_buffer_size")
             TrackingUnpacker.created += 1
+            self.index = TrackingUnpacker.created  # 1=initial, 2=reset on exc
             TrackingUnpacker.living.add(self)
 
         def feed(self, data):
@@ -836,6 +837,30 @@ async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypa
         assert stream.closed
         # initial creation + reset on exception
         assert TrackingUnpacker.created == 2
+
+        # --- TEMPORARY CI DIAGNOSTIC DUMP ------------------------------------
+        # This liveness check is intermittently flaky on macOS. When it fails,
+        # dump which unpacker (index 1=initial, 2=reset) is still alive and the
+        # strong referrers keeping it from being collected, so the CI log tells
+        # us what holds it (e.g. an exception traceback frame).
+        living = list(TrackingUnpacker.living)
+        if living:
+            diag = ["", "=== unpacker liveness DIAGNOSTIC ==="]
+            diag.append(f"created={TrackingUnpacker.created} living={len(living)}")
+            for obj in living:
+                referrers = [r for r in gc.get_referrers(obj) if r is not living]
+                diag.append(
+                    f"  unpacker index={getattr(obj, 'index', '?')} "
+                    f"id={id(obj)} referrers={len(referrers)}"
+                )
+                for ref in referrers:
+                    diag.append(
+                        f"    referrer type={type(ref).__name__} "
+                        f"repr={repr(ref)[:200]}"
+                    )
+            print("\n".join(diag), flush=True)
+        # ---------------------------------------------------------------------
+
         assert not TrackingUnpacker.living
     finally:
         tcp_log.setLevel(original_level)

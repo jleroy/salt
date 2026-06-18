@@ -4797,16 +4797,68 @@ def test__clean_value_uuid(caplog):
     ret = core._clean_value("uuid", "49e40e2a-63b4-11ee-8c99-0242ac120002")
     assert ret == "49e40e2a-63b4-11ee-8c99-0242ac120002"
 
+    # --- TEMPORARY CI DIAGNOSTIC INSTRUMENTATION ---------------------------
+    # This test is intermittently flaky on macOS: caplog.messages comes back
+    # empty even though _clean_value() reaches the log.trace() call. To find
+    # out *why* from the CI log, attach our own handler directly to the module
+    # logger, in parallel to caplog. If our handler also stays empty the
+    # problem is in the logger hierarchy (disabled/propagate/disable/level);
+    # if our handler captures but caplog does not, the problem is in pytest's
+    # caplog machinery. On failure we dump the full logging state.
+    own_records = []
+
+    class _OwnHandler(logging.Handler):
+        def emit(self, record):
+            own_records.append(record.getMessage())
+
+    own_handler = _OwnHandler(level=logging.TRACE)
+    core.log.addHandler(own_handler)
+    # -----------------------------------------------------------------------
+
     caplog.clear()
-    with patch.object(uuid, "UUID", MagicMock()) as mock_uuid:
-        with caplog.at_level(logging.TRACE, logger=core.log.name):
-            mock_uuid.side_effect = ValueError()
-            ret = core._clean_value("uuid", "49e40e2a-63b4-11ee-8c99-0242ac120002")
-            assert not ret
-            needle = "49e40e2a-63b4-11ee-8c99-0242ac120002"
-            assert any(
-                "invalid UUID" in m and needle in m for m in caplog.messages
-            ), caplog.messages
+    try:
+        with patch.object(uuid, "UUID", MagicMock()) as mock_uuid:
+            with caplog.at_level(logging.TRACE, logger=core.log.name):
+                mock_uuid.side_effect = ValueError()
+                ret = core._clean_value("uuid", "49e40e2a-63b4-11ee-8c99-0242ac120002")
+                assert not ret
+                needle = "49e40e2a-63b4-11ee-8c99-0242ac120002"
+
+                captured = any(
+                    "invalid UUID" in m and needle in m for m in caplog.messages
+                )
+
+                # --- TEMPORARY CI DIAGNOSTIC DUMP --------------------------
+                if not captured:
+                    diag = ["", "=== test__clean_value_uuid DIAGNOSTIC ==="]
+                    diag.append(f"caplog.messages={caplog.messages!r}")
+                    diag.append(f"own_handler_records={own_records!r}")
+                    diag.append(f"root.manager.disable={logging.root.manager.disable}")
+                    diag.append(f"logging.TRACE={logging.TRACE}")
+                    diag.append(
+                        "core.log.isEnabledFor(TRACE)="
+                        f"{core.log.isEnabledFor(logging.TRACE)}"
+                    )
+                    for name in ("", "salt", "salt.grains", "salt.grains.core"):
+                        lg = logging.getLogger(name) if name else logging.root
+                        diag.append(
+                            f"logger {name!r}: level={lg.level} "
+                            f"eff={lg.getEffectiveLevel()} disabled={lg.disabled} "
+                            f"propagate={lg.propagate} handlers={lg.handlers!r}"
+                        )
+                    diag.append(
+                        f"caplog.handler={caplog.handler!r} "
+                        f"level={caplog.handler.level}"
+                    )
+                    diag_str = "\n".join(diag)
+                    print(diag_str, flush=True)
+                else:
+                    diag_str = ""
+                # -----------------------------------------------------------
+
+                assert captured, diag_str or caplog.messages
+    finally:
+        core.log.removeHandler(own_handler)
 
 
 @pytest.mark.parametrize(
