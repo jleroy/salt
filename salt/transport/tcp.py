@@ -188,7 +188,14 @@ class LoadBalancerServer(salt.utils.process.SignalHandlingProcess):
 
     def close(self):
         if self._socket is not None:
-            self._socket.shutdown(socket.SHUT_RDWR)
+            try:
+                self._socket.shutdown(socket.SHUT_RDWR)
+            except OSError as exc:
+                # The socket is a listening socket with no connected peer, so
+                # shutdown() raises ENOTCONN on some platforms (e.g. macOS/BSD).
+                # There is nothing to shut down in that case, just close it.
+                if exc.errno != errno.ENOTCONN:
+                    raise
             self._socket.close()
             self._socket = None
 
