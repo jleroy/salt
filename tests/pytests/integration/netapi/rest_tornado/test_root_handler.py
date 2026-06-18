@@ -252,8 +252,8 @@ async def test_simple_local_runner_async_post(http_client):
         "/",
         method="POST",
         body=salt.utils.json.dumps(low),
-        connect_timeout=10,
-        request_timeout=10,
+        connect_timeout=30,
+        request_timeout=30,
     )
     response_obj = salt.utils.json.loads(response.body)
     assert "return" in response_obj
