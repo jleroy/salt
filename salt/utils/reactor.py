@@ -2,12 +2,10 @@
 Functions which implement running reactor jobs
 """
 
-import datetime
 import fnmatch
 import glob
 import logging
 import os
-import time
 
 import salt.client
 import salt.defaults.exitcodes
@@ -25,19 +23,6 @@ import salt.utils.yaml
 import salt.wheel
 
 log = logging.getLogger(__name__)
-
-
-def _reactor_debug_lag(data):
-    """TEMPORARY: seconds between an event's _stamp and now (or None)."""
-    stamp = data.get("data", {}).get("_stamp")
-    if not stamp:
-        return None
-    try:
-        ts = datetime.datetime.fromisoformat(stamp)
-        return round((datetime.datetime.now(ts.tzinfo) - ts).total_seconds(), 3)
-    except (ValueError, TypeError):
-        return None
-
 
 REACTOR_INTERNAL_KEYWORDS = frozenset(
     ["__id__", "__sls__", "name", "order", "fun", "key", "state"]
@@ -245,37 +230,7 @@ class Reactor(salt.utils.process.SignalHandlingProcess, salt.state.Compiler):
         ) as event:
             self.wrap = ReactWrap(self.opts)
 
-            # --- TEMPORARY REACTOR DEBUG INSTRUMENTATION ---
-            log.error("REACTOR_DEBUG loop starting (is_leader=%s)", self.is_leader)
-            _dbg_last_hb = time.monotonic()
-            _dbg_count = 0
-            # --- END ---
-
             for data in event.iter_events(full=True):
-                # --- TEMPORARY REACTOR DEBUG INSTRUMENTATION ---
-                _dbg_count += 1
-                if "salt/reactors/manage" in data["tag"]:
-                    log.error(
-                        "REACTOR_DEBUG manage event received tag=%s lag=%ss"
-                        " is_leader=%s",
-                        data["tag"],
-                        _reactor_debug_lag(data),
-                        self.is_leader,
-                    )
-                _dbg_now = time.monotonic()
-                if _dbg_now - _dbg_last_hb >= 5:
-                    log.error(
-                        "REACTOR_DEBUG heartbeat: processed %d events in last"
-                        " %.1fs, current tag=%s lag=%ss",
-                        _dbg_count,
-                        _dbg_now - _dbg_last_hb,
-                        data["tag"],
-                        _reactor_debug_lag(data),
-                    )
-                    _dbg_last_hb = _dbg_now
-                    _dbg_count = 0
-                # --- END ---
-
                 # skip all events fired by ourselves
                 if data["data"].get("user") == self.wrap.event_user:
                     continue
@@ -291,11 +246,6 @@ class Reactor(salt.utils.process.SignalHandlingProcess, salt.state.Compiler):
                         )
                         continue
                 if data["tag"].endswith("salt/reactors/manage/is_leader"):
-                    log.error(
-                        "REACTOR_DEBUG firing leader/value reply for is_leader"
-                        " (is_leader=%s)",
-                        self.is_leader,
-                    )
                     event.fire_event(
                         {"result": self.is_leader}, "salt/reactors/manage/leader/value"
                     )
