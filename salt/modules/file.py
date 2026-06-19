@@ -887,9 +887,17 @@ def get_source_sum(
         try:
             proto = urllib.parse.urlparse(source_hash).scheme
             if proto in salt.utils.files.VALID_PROTOS:
-                hash_fn = __salt__["cp.cache_file"](
-                    source_hash, saltenv, verify_ssl=verify_ssl
-                )
+                try:
+                    hash_fn = __salt__["cp.cache_file"](
+                        source_hash, saltenv, verify_ssl=verify_ssl
+                    )
+                except (MinionError, CommandExecutionError):
+                    # Any failure to retrieve the hash file (missing file, DNS
+                    # resolution failure, connection error, ...) should be
+                    # reported as a missing source hash file rather than leaking
+                    # a raw transport error (e.g. "[Errno 8] nodename nor
+                    # servname provided") up to "Unable to manage file".
+                    hash_fn = None
                 if not hash_fn:
                     raise CommandExecutionError(
                         f"Source hash file {salt.utils.url.redact_http_basic_auth(source_hash)} not found"
