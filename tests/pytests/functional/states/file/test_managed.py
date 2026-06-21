@@ -1159,7 +1159,7 @@ def test_issue_60203(
     ret = file.managed(str(name), source=source, source_hash=source_hash)
     assert ret.result is False
     assert ret.comment
-    assert "Source hash" in ret.comment
+    assert "Error retrieving source hash file" in ret.comment
     assert "/files/test.tar.gz.sha256" in ret.comment
     assert "dontshowme" not in ret.comment
 
