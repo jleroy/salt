@@ -137,37 +137,6 @@ def test_get_set_zone(timezone):
     """
     # Correct Functionality
     ret = timezone.set_zone("Pacific/Wake")
-    if not ret:
-        # CI debug (macOS 26): set_zone returned False even though
-        # `systemsetup -settimezone` reportedly succeeds. Capture the real
-        # state so we can tell "the change never applied" from "get_zone read
-        # it back stale". --show-capture=no hides captured stdout/log, so embed
-        # everything in the failure message which is always shown.
-        import subprocess
-
-        def _raw(*args):
-            proc = subprocess.run(
-                ["systemsetup", *args],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            return {
-                "retcode": proc.returncode,
-                "stdout": proc.stdout,
-                "stderr": proc.stderr,
-            }
-
-        diagnostics = {
-            "salt_get_zone": timezone.get_zone(),
-            "raw_get_after_failed_set": _raw("-gettimezone"),
-            "pacific_wake_in_list_zones": "Pacific/Wake" in timezone.list_zones(),
-            "raw_reset_wake": _raw("-settimezone", "Pacific/Wake"),
-            "raw_get_after_reset": _raw("-gettimezone"),
-        }
-        pytest.fail(
-            f"set_zone('Pacific/Wake') returned {ret!r}. Diagnostics: {diagnostics!r}"
-        )
     assert ret
 
     ret = timezone.get_zone()
