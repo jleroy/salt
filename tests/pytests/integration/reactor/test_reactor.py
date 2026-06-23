@@ -105,7 +105,6 @@ def test_reactor_reaction(
 
 @pytest.mark.skip_on_windows(reason=PRE_PYTEST_SKIP_REASON)
 @pytest.mark.timeout_unless_on_windows(120)
-@pytest.mark.flaky(max_runs=3)
 def test_reactor_is_leader(
     event_listener,
     salt_master,

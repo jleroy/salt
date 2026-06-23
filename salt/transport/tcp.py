@@ -1387,35 +1387,64 @@ class PubServer(tornado.tcpserver.TCPServer):
         # Handshake didn't complete after retries - reject
         stream.close()
 
+    async def _write_to_subscriber(self, client, payload):
+        """
+        Write a payload to a single subscriber.
+
+        Returns the client if it should be dropped (the stream closed or the
+        subscriber was too slow to accept the publish), otherwise ``None``.
+        """
+        timeout = self.opts.get("pub_server_publish_timeout", 5)
+        try:
+            await asyncio.wait_for(client.stream.write(payload), timeout)
+        except tornado.iostream.StreamClosedError:
+            return client
+        except (asyncio.TimeoutError, TimeoutError):
+            # The subscriber's receive buffer is full and it is not draining
+            # it. Writing to subscribers sequentially would let this one block
+            # delivery to every other subscriber (head-of-line blocking that
+            # could freeze the whole event bus), so drop it instead; it will
+            # reconnect.
+            log.warning(
+                "Subscriber at %s is too slow to receive publishes, "
+                "disconnecting it to avoid blocking the event bus",
+                client.address,
+            )
+            return client
+        return None
+
     # TODO: ACK the publish through IPC
     async def publish_payload(self, package, topic_list=None):
         log.trace(
             "TCP PubServer sending payload: topic_list=%r %r", topic_list, package
         )
         payload = salt.transport.frame.frame_msg(package)
-        to_remove = []
         if topic_list:
+            targets = []
+            seen = set()
+            clients = list(self.clients)
             for topic in topic_list:
-                sent = False
-                for client in list(self.clients):
+                matched = False
+                for client in clients:
                     if topic == client.id_:
-                        try:
-                            # Write the packed str
-                            await client.stream.write(payload)
-                            sent = True
-                            # self.io_loop.add_future(f, lambda f: True)
-                        except tornado.iostream.StreamClosedError:
-                            to_remove.append(client)
-                if not sent:
+                        matched = True
+                        if id(client) not in seen:
+                            seen.add(id(client))
+                            targets.append(client)
+                if not matched:
                     log.debug("Publish target %s not connected %r", topic, self.clients)
         else:
-            for client in list(self.clients):
-                try:
-                    # Write the packed str
-                    await client.stream.write(payload)
-                except tornado.iostream.StreamClosedError:
-                    to_remove.append(client)
+            targets = list(self.clients)
+
+        # Write to all subscribers concurrently and with a per-subscriber
+        # timeout so a single slow or stalled subscriber cannot block delivery
+        # to the others.
+        to_remove = await asyncio.gather(
+            *(self._write_to_subscriber(client, payload) for client in targets)
+        )
         for client in to_remove:
+            if client is None:
+                continue
             log.debug(
                 "Subscriber at %s has disconnected from publisher", client.address
             )
