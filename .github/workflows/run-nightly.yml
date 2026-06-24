@@ -53,7 +53,7 @@ jobs:
     environment: workflow-restart
     strategy:
       matrix:
-        branch: [3006.x, 3007.x, master]
+        branch: [3006.x, 3007.x, 3008.x, master]
     steps:
 
       - name: Generate a token

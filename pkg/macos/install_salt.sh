@@ -127,7 +127,7 @@ fi
 # Install Requirements into the Python Environment
 #-------------------------------------------------------------------------------
 _msg "Installing Salt requirements"
-$PIP_BIN install -r "$REQ_FILE" > /dev/null 2>&1
+$PIP_BIN install -r "$REQ_FILE"
 if [ -f "$BUILD_DIR/bin/distro" ]; then
     _success
 else
@@ -138,7 +138,7 @@ fi
 # Install Salt into the Python Environment
 #-------------------------------------------------------------------------------
 _msg "Installing Salt"
-RELENV_PIP_DIR="yes" $PIP_BIN install "$SRC_DIR" > /dev/null 2>&1
+RELENV_PIP_DIR="yes" $PIP_BIN install "$SRC_DIR"
 TEST_DIR="$SCRIPT_DIR/build/opt/salt/lib/python3.*/site-packages/salt*"
 if compgen -G "$TEST_DIR" > /dev/null; then
     _success

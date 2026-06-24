@@ -108,9 +108,7 @@ jobs:
         shell: bash
         run: |
           HASH=$(python3 .github/scripts/hash-files.py \
-            'requirements/**/*.txt' \
-            'requirements/**/*.in' \
-            'requirements/**/*.lock' \
+            'requirements/**/*' \
             'cicd/golden-images.json' \
             'noxfile.py' \
             'pkg/common/env-cleanup-rules.yml' \

@@ -458,6 +458,7 @@ pycryptodomex==3.23.0
     # via
     #   -c requirements/static/pkg/py3.9/linux.lock
     #   -r requirements/base.txt
+    #   -r requirements/crypto.txt
     #   -r requirements/static/ci/common.txt
 pyeapi==1.0.4
     # via napalm

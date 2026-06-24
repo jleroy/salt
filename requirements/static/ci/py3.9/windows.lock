@@ -381,6 +381,7 @@ pycryptodomex==3.23.0
     # via
     #   -c requirements/static/pkg/py3.9/windows.lock
     #   -r requirements/base.txt
+    #   -r requirements/crypto.txt
     #   -r requirements/static/ci/common.txt
 pyfakefs==5.3.1
     # via -r requirements/pytest.txt

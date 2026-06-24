@@ -504,12 +504,12 @@ opentelemetry-semantic-conventions==0.63b1 ; python_full_version >= '3.10'
     #   opentelemetry-sdk
 oscrypto==1.3.0 ; sys_platform != 'win32'
     # via certvalidator
-packaging==24.0 ; python_full_version >= '3.11'
+packaging==24.0 ; python_full_version >= '3.11' and python_full_version < '3.14'
     # via
     #   -c requirements/static/pkg/py3.9/freebsd.lock
     #   -r requirements/base.txt
     #   pytest
-packaging==26.2 ; python_full_version < '3.11'
+packaging==26.2 ; python_full_version < '3.11' or python_full_version >= '3.14'
     # via
     #   -c requirements/static/pkg/py3.9/freebsd.lock
     #   -r requirements/base.txt
@@ -592,6 +592,7 @@ pycryptodomex==3.23.0
     # via
     #   -c requirements/static/pkg/py3.9/freebsd.lock
     #   -r requirements/base.txt
+    #   -r requirements/crypto.txt
     #   -r requirements/static/ci/common.txt
 pyeapi==1.0.4 ; python_full_version < '3.10' and sys_platform != 'win32'
     # via napalm

@@ -409,6 +409,7 @@ pycryptodomex==3.23.0
     # via
     #   -c requirements/static/pkg/py3.13/linux.lock
     #   -r requirements/base.txt
+    #   -r requirements/crypto.txt
     #   -r requirements/static/ci/common.txt
 pyfakefs==6.0.0
     # via -r requirements/pytest.txt

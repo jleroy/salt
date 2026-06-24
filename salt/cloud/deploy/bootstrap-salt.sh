@@ -2773,7 +2773,7 @@ __install_salt_from_repo() {
     echodebug "Created directory ${_TMP_DIR}/git/deps"
 
     if [ ${DISTRO_NAME_L} = "ubuntu" ] && [ "$DISTRO_MAJOR_VERSION" -eq 22 ]; then
-        echodebug "Ubuntu 22.04 has problem with base.txt requirements file, not parsing sys_platform == 'win32', upgrading from default pip works"
+        echodebug "Ubuntu 22.04 has problem with base.in requirements file, not parsing sys_platform == 'win32', upgrading from default pip works"
         echodebug "${_pip_cmd} install ${_USE_BREAK_SYSTEM_PACKAGES} --upgrade  pip"
         ${_pip_cmd} install ${_USE_BREAK_SYSTEM_PACKAGES} --upgrade  pip
         # shellcheck disable=SC2181
