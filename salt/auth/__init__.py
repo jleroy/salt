@@ -253,8 +253,14 @@ class LoadAuth:
             new_token = str(hash_type(os.urandom(512)).hexdigest())
             tdata["token"] = new_token
             try:
-                # ``Cache.store`` expects ``expires`` as seconds-from-now, not an
-                # absolute timestamp; ``tdata["expire"]`` is absolute.
+                # ``Cache.store``'s ``expires`` is a *relative* duration in
+                # seconds, not an absolute epoch. Passing ``tdata["expire"]``
+                # here -- which is ``time.time() + token_expire`` -- caused
+                # the envelope ``_expires`` to be set to ``now + (now +
+                # token_expire)`` (~ year 4090), and combined with the
+                # broken ``Cache.clean_expired`` fallback resulted in tokens
+                # being deleted within a single master loop interval.
+                # Issue #69307.
                 self.cache.store("tokens", new_token, tdata, expires=token_expire)
             except salt.exceptions.SaltCacheError as err:
                 log.error(
