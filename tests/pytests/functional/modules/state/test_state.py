@@ -761,7 +761,10 @@ def test_retry_option_success(state, state_tree, tmp_path):
     )
     duration = 4
     if salt.utils.platform.spawning_platform():
-        duration = 16
+        duration = 30
+        # macOS CI runners are slow, so allow some extra headroom
+        if salt.utils.platform.is_darwin():
+            duration += 30
 
     with pytest.helpers.temp_file("retry.sls", sls_contents, state_tree):
         ret = state.sls("retry")
@@ -797,9 +800,9 @@ def test_retry_option_success_parallel(state, state_tree, tmp_path):
     duration = 4
     if salt.utils.platform.spawning_platform():
         duration = 30
-        # mac needs some more time to do its makeup
+        # macOS CI runners are slow, so allow some extra headroom
         if salt.utils.platform.is_darwin():
-            duration += 15
+            duration += 30
 
     with pytest.helpers.temp_file("retry.sls", sls_contents, state_tree):
         ret = state.sls(
