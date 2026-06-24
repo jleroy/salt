@@ -12,24 +12,6 @@ from tests.conftest import FIPS_TESTRUN
 log = logging.getLogger(__name__)
 
 
-def pytest_collection_modifyitems(items):
-    """
-    Skip every cluster test on macOS.
-
-    The multi-master Raft setup relies on extra loopback aliases and spawns
-    several masters that do not come up reliably on macOS; they error out after
-    long start-up timeouts and leave daemons behind that can wedge interpreter
-    shutdown.
-    """
-    if not salt.utils.platform.is_darwin():
-        return
-    cluster_dir = str(pathlib.Path(__file__).parent)
-    skip_macos = pytest.mark.skip(reason="Cluster tests are not supported on macOS")
-    for item in items:
-        if str(item.fspath).startswith(cluster_dir):
-            item.add_marker(skip_macos)
-
-
 # ---------------------------------------------------------------------------
 # Election-storm diagnostic
 # ---------------------------------------------------------------------------
