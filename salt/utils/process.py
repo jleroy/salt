@@ -945,6 +945,16 @@ class Process(multiprocessing.Process):
         logging_config = state["logging_config"]
         # This will invoke __init__ of the most derived class.
         self.__init__(*args, **kwargs)
+        # Re-seed the pickling args/kwargs. During unpickling, __new__ runs
+        # with no arguments, so the capture there leaves these empty. Without
+        # restoring them here, an object that is pickled a second time (e.g.
+        # carried inside a ProcessManager ``_process_map`` into an
+        # already-spawned process that then spawns a further child) would emit
+        # empty args from __getstate__, and __setstate__ would call __init__()
+        # with no arguments -- breaking subclasses with required positional
+        # arguments such as salt.master.EventMonitor(opts, ipc_publisher).
+        self._args_for_getstate = copy.copy(args)
+        self._kwargs_for_getstate = copy.copy(kwargs)
         # Override self.__logging_config__ with what's in state
         self.__logging_config__ = logging_config
         for function, args, kwargs in state["after_fork_methods"]:
