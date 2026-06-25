@@ -2835,6 +2835,15 @@ class MasterPubServerChannel:
         """Clean implementation: separate local IPC from cluster peer communication."""
         import salt.master  # pylint: disable=import-outside-toplevel
 
+        # On spawning platforms this runs in a fresh interpreter where the
+        # ``SMaster.secrets`` class attribute is empty. ``pre_fork`` forwards
+        # the parent's secrets as a kwarg precisely so we can re-seed them
+        # here; without this, publish_payload / send_aes_key_event raise
+        # ``KeyError: 'aes'`` when reading the AES key.
+        secrets = kwargs.get("secrets")
+        if secrets is not None:
+            salt.master.SMaster.secrets = secrets
+
         if (
             self.opts.get("event_publisher_niceness")
             and not salt.utils.platform.is_windows()
