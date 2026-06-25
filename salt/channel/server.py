@@ -1573,6 +1573,9 @@ class MasterPubServerChannel:
         transport,
         presence_events=False,
     ):
+        # NOTE: on spawning platforms this object is rebuilt via __setstate__,
+        # not __init__. Any attribute added here must also be added to
+        # __setstate__ below, or it will be missing in spawned processes.
         self.opts = opts
         self.transport = transport
         self.io_loop = tornado.ioloop.IOLoop.current()
@@ -2794,9 +2797,20 @@ class MasterPubServerChannel:
         }
 
     def __setstate__(self, state):
+        # Mirror __init__ for the attributes that are not carried in the
+        # pickled state: on spawning platforms this object is reconstructed
+        # via __setstate__ (not __init__), so anything __init__ sets must be
+        # re-established here or it goes missing (e.g. ``cluster_peers`` used
+        # by ``send_aes_key_event`` and ``master_key`` used to sign events).
         self.opts = state["opts"]
         self.transport = state["transport"]
+        self.io_loop = tornado.ioloop.IOLoop.current()
+        self.master_key = salt.crypt.MasterKeys(self.opts)
+        self.peer_keys = {}
+        self.cluster_peers = self.opts["cluster_peers"]
         self._discover_event = None
+        self._discover_token = None
+        self._discover_candidates = {}
         self._raft_dispatcher = None
         self._raft_service = None
 
