@@ -84,8 +84,15 @@ def non_root_minion(salt_master, salt_factories):
         random_string("non-root-minion-"),
         overrides=config_overrides,
     )
-    with factory.started():
-        yield factory
+    try:
+        with factory.started():
+            yield factory
+    finally:
+        # Stopping the minion does not remove its key from the shared session
+        # master, it only stops the process. Delete the accepted key here;
+        # otherwise it outlives this module and every later test in the session
+        # targeting '*' sees a phantom minion that never returns.
+        salt_master.salt_key_cli(timeout=30).run("-d", factory.id, "-y")
 
 
 @pytest.mark.skip_if_not_root
