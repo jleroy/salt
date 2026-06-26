@@ -56,14 +56,17 @@ def test_minion_hangs_on_master_failure_50814(
             if time.time() - start > timeout:
                 raise TimeoutError("Minion failed to respond top ping after timeout")
 
-    # Wait for the minion to re-connect so this test will not affect any
-    # others.
-    salt_mm_master_1.after_start(
-        wait_for_minion, salt_mm_master_1.salt_cli(), salt_mm_minion_1.id
-    )
-
-    # Now, let's try this one of the masters offline
-    with salt_mm_master_1.stopped():
+    # Now, let's take one of the masters offline. When it comes back up, wait
+    # for the minion to re-connect so this test will not affect any others.
+    # Scope the wait to this restart via stopped()'s after_start_callback
+    # instead of registering a persistent after_start hook: salt_mm_master_1
+    # yields the package-scoped factory, so a persistent hook would leak into
+    # every later test and make their mm-master-1 restarts hang on the minion.
+    with salt_mm_master_1.stopped(
+        after_start_callback=lambda daemon: wait_for_minion(
+            daemon.salt_cli(), salt_mm_minion_1.id
+        )
+    ):
         assert salt_mm_master_1.is_running() is False
         # Sending one event would be okay. It would hang after the second with one of the masters offline
         event_count = 1
