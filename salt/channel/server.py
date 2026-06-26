@@ -3859,6 +3859,24 @@ class MasterPubServerChannel:
             return
         tasks = []
         if not tag.startswith("cluster/peer"):
+            # TEMP DIAG #4: is this handler reached for locally-fired events
+            # (e.g. salt/master/<id>/start) and does the local pub server have
+            # any connected subscribers to deliver to?  Remove once resolved.
+            try:
+                _pub_server = getattr(self.transport, "pub_server", None)
+                _nclients = (
+                    len(_pub_server.clients)
+                    if _pub_server is not None
+                    else "no-pub_server"
+                )
+            except Exception as _exc:  # pylint: disable=broad-except
+                _nclients = f"err:{_exc!r}"
+            log.error(
+                "DIAG4 publish_payload id=%s tag=%r local_subscribers=%s",
+                self.opts.get("id"),
+                tag,
+                _nclients,
+            )
             tasks = [
                 asyncio.create_task(
                     self.transport.publish_payload(load), name=self.opts["id"]
