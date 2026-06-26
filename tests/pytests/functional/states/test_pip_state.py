@@ -42,6 +42,14 @@ pytestmark = [
     # one or more pip operations, all traced in the parent.  Bump
     # the per-test ceiling to absorb runner variance.
     pytest.mark.timeout(180, func_only=True),
+    # Salt pins the "fork" multiprocessing start method on Linux + Python 3.14
+    # (salt/scripts.py), so forked daemon workers inherit every open fd -- CLOEXEC
+    # only closes on exec(), not fork().  If a worker forks while relenv's
+    # ``system_sysconfig`` has a ``subprocess.run(capture_output=True)`` pipe open,
+    # the worker inherits the write-end, the read never sees EOF, and the test
+    # hangs until pytest-timeout fires.  It's an intermittent fork/pipe race
+    # (a fresh, lightly-loaded process does not hit it), so retry.
+    pytest.mark.flaky(max_runs=3),
 ]
 
 
