@@ -1644,6 +1644,11 @@ class PublishServer(salt.transport.base.DaemonizedPublishServer):
     ):
         self.opts = opts
         self.pub_sock = None
+        # Optional cap (seconds) on the blocking connect performed by
+        # ``publish``. Left as ``None`` (no cap) for the normal minion-publish
+        # path; cluster peer pushers set a short value so a connect to a
+        # not-yet-started peer fails fast instead of stalling the io_loop.
+        self.connect_timeout = None
         self.pub_host = pub_host
         self.pub_port = pub_port
         self.pub_path = pub_path
@@ -1820,7 +1825,7 @@ class PublishServer(salt.transport.base.DaemonizedPublishServer):
         Publish "load" to minions
         """
         if not self.pub_sock:
-            self.connect()
+            self.connect(timeout=self.connect_timeout)
         self.pub_sock.send(payload)
 
     def close(self):
@@ -1965,7 +1970,16 @@ class _TCPPubServerPublisher:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.stream = tornado.iostream.IOStream(sock)
             try:
-                await self.stream.connect(sock_addr)
+                # ``timeout`` here bounds the whole retry loop; without also
+                # bounding the individual connect, a connect to an unreachable
+                # host blocks for the full OS timeout (SYN retries, ~tens of
+                # seconds) before the loop can re-check. Cap the per-attempt
+                # connect so callers that pass a timeout (e.g. cluster peer
+                # pushers) actually fail fast.
+                if timeout is not None:
+                    await asyncio.wait_for(self.stream.connect(sock_addr), timeout)
+                else:
+                    await self.stream.connect(sock_addr)
                 self._connecting_future.set_result(True)
                 break
             except Exception as e:  # pylint: disable=broad-except
