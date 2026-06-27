@@ -3801,6 +3801,9 @@ class MasterPubServerChannel:
 
     async def publish_payload(self, load, *args):
         tag, data = salt.utils.event.SaltEvent.unpack(load)
+        # TEMP DIAG #4: unconditional entry log — does *any* event (incl. the
+        # engine-fired salt/master/<id>/start) reach this handler at all?
+        log.error("DIAG5 publish_payload-entry id=%s tag=%r", self.opts.get("id"), tag)
         # Operator-triggered cluster operations originate as ``cluster/runner/*``
         # events fired by the runner subprocess.  Intercept them here so the
         # event is consumed locally rather than broadcast as a regular
