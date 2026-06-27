@@ -182,7 +182,7 @@ jobs:
         id: setup-salt-version
         uses: ./.github/actions/setup-salt-version
         with:
-          salt-version: "${{ inputs.salt-version }}"
+          salt-version: "3008.1"
           validate-version: true
 
       - name: Get Hash For Nox Tarball Cache
