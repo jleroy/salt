@@ -1543,12 +1543,6 @@ class TCPPuller:
                 unpacker.feed(wire_bytes)
                 for framed_msg in unpacker:
                     body = framed_msg["body"]
-                    if self.path and "master_event_pull" in self.path:  # TEMP DIAG #4
-                        log.error(
-                            "DIAG6 TCPPuller recv on %s nbytes=%s",
-                            self.path,
-                            len(wire_bytes),
-                        )
                     self.io_loop.create_task(self.payload_handler(body))
             except tornado.iostream.StreamClosedError:
                 if self.path:
@@ -1573,8 +1567,6 @@ class TCPPuller:
                 log.error("Exception occurred while handling stream: %s", exc)
 
     def handle_connection(self, connection, address):
-        if self.path and "master_event_pull" in self.path:  # TEMP DIAG #4
-            log.error("DIAG7 TCPPuller new connection on %s", self.path)
         log.trace(
             "IPCServer: Handling connection to address: %s",
             address if address else connection,
