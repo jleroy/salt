@@ -1644,11 +1644,6 @@ class PublishServer(salt.transport.base.DaemonizedPublishServer):
     ):
         self.opts = opts
         self.pub_sock = None
-        # Optional cap (seconds) on the blocking connect performed by
-        # ``publish``. Left as ``None`` (no cap) for the normal minion-publish
-        # path; cluster peer pushers set a short value so a connect to a
-        # not-yet-started peer fails fast instead of stalling the io_loop.
-        self.connect_timeout = None
         self.pub_host = pub_host
         self.pub_port = pub_port
         self.pub_path = pub_path
@@ -1825,7 +1820,7 @@ class PublishServer(salt.transport.base.DaemonizedPublishServer):
         Publish "load" to minions
         """
         if not self.pub_sock:
-            self.connect(timeout=self.connect_timeout)
+            self.connect()
         self.pub_sock.send(payload)
 
     def close(self):
@@ -2052,6 +2047,42 @@ class _TCPPubServerPublisher:
             await self.connect()
         pack = salt.transport.frame.frame_msg_ipc(msg, raw_body=True)
         await self.stream.write(pack)
+
+
+class ClusterPeerPusher:
+    """
+    Fully-async client that pushes events to a single cluster peer's pull
+    socket, used by ``salt.channel.server.MasterPubServerChannel`` to fan
+    events out to peer masters.
+
+    Unlike ``PublishServer.publish`` (which wraps connect/send in a
+    ``SyncWrapper`` driving a nested, *blocking* ``run_until_complete``), this
+    awaits connect/send directly, so a push to an unreachable peer never blocks
+    the caller's io_loop. That matters during cluster bring-up: the founding
+    master comes up before its peers exist, and a blocking connect to a
+    not-yet-listening peer would stall the event loop and starve delivery of
+    the master's own local events (e.g. ``salt/master/<id>/start``), preventing
+    it from ever signalling that it started.
+    """
+
+    def __init__(self, pull_host, pull_port, connect_timeout=None):
+        self.pull_host = pull_host
+        self.pull_port = pull_port
+        self.connect_timeout = connect_timeout
+        self.pub_sock = None
+
+    async def publish(self, payload, **kwargs):
+        if self.pub_sock is None or not self.pub_sock.connected():
+            if self.pub_sock is not None:
+                self.pub_sock.close()
+            self.pub_sock = _TCPPubServerPublisher(self.pull_host, self.pull_port, None)
+            await self.pub_sock.connect(timeout=self.connect_timeout)
+        await self.pub_sock.send(payload)
+
+    def close(self):
+        if self.pub_sock is not None:
+            self.pub_sock.close()
+            self.pub_sock = None
 
 
 class RequestClient(salt.transport.base.RequestClient):

@@ -3032,18 +3032,16 @@ class MasterPubServerChannel:
     def pusher(self, peer, port=None):
         if port is None:
             port = self.tcp_master_pool_port
-        pusher = salt.transport.tcp.PublishServer(
-            self.opts,
-            pull_host=peer,
-            pull_port=port,
+        # Async, non-blocking pusher: a push to a not-yet-started peer (normal
+        # during cluster bring-up) must never block the event io_loop, or it
+        # starves delivery of local events like the master's own
+        # ``salt/master/<id>/start``. The connect is capped by
+        # ``cluster_peer_connect_timeout`` (default 5s) so it also fails fast.
+        return salt.transport.tcp.ClusterPeerPusher(
+            peer,
+            int(port),
+            connect_timeout=self.opts.get("cluster_peer_connect_timeout", 5),
         )
-        # ``publish`` opens a blocking TCP connection on first use. During
-        # cluster bring-up peers start one at a time, so a push to a peer that
-        # is not listening yet stalls the event io_loop for the full OS connect
-        # timeout -- starving delivery of local events like the master's own
-        # ``salt/master/<id>/start``. Cap it so a dead peer fails fast.
-        pusher.connect_timeout = self.opts.get("cluster_peer_connect_timeout", 5)
-        return pusher
 
     def _add_pusher(self, pusher):
         """
