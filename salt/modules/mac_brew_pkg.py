@@ -164,6 +164,11 @@ def _call_brew(*cmd, failhard=True):
         runas=runas,
         output_loglevel="trace",
         python_shell=False,
+        # Don't let Homebrew kick off an implicit ``brew update`` before other
+        # commands: it's slow, non-deterministic for a config-management tool,
+        # and races the explicit ``brew update`` in ``refresh_db`` (the
+        # "Another `brew update` process is already running" failure).
+        env={"HOMEBREW_NO_AUTO_UPDATE": "1"},
     )
     if failhard and result["retcode"] != 0:
         raise CommandExecutionError("Brew command failed", info={"result": result})
