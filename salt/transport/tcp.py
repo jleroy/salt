@@ -2062,14 +2062,23 @@ class ClusterPeerPusher:
         self.pull_port = pull_port
         self.connect_timeout = connect_timeout
         self.pub_sock = None
+        # Serialize publishes: a reused pusher is shared across concurrent
+        # ``publish_payload`` calls, and without a lock two of them would race
+        # on ``self.pub_sock`` (one reconnecting while the other is mid-send),
+        # tearing the connection down and dropping peer events. The blocking
+        # SyncWrapper this replaced serialized implicitly; keep that guarantee.
+        self._lock = asyncio.Lock()
 
     async def publish(self, payload, **kwargs):
-        if self.pub_sock is None or not self.pub_sock.connected():
-            if self.pub_sock is not None:
-                self.pub_sock.close()
-            self.pub_sock = _TCPPubServerPublisher(self.pull_host, self.pull_port, None)
-            await self.pub_sock.connect(timeout=self.connect_timeout)
-        await self.pub_sock.send(payload)
+        async with self._lock:
+            if self.pub_sock is None or not self.pub_sock.connected():
+                if self.pub_sock is not None:
+                    self.pub_sock.close()
+                self.pub_sock = _TCPPubServerPublisher(
+                    self.pull_host, self.pull_port, None
+                )
+                await self.pub_sock.connect(timeout=self.connect_timeout)
+            await self.pub_sock.send(payload)
 
     def close(self):
         if self.pub_sock is not None:
