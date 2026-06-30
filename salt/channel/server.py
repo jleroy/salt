@@ -3903,13 +3903,21 @@ class MasterPubServerChannel:
         for task in tasks:
             try:
                 task.result()
-            # XXX This error is transport specific and should be something else
-            except tornado.iostream.StreamClosedError:
+            # A closed stream, a refused/timed-out connect to a peer that isn't
+            # listening yet (normal during bring-up), or any other socket error
+            # all mean the same thing here: the push didn't land, reset and
+            # retry. asyncio.TimeoutError/ConnectionError are subclasses of
+            # OSError, but list them for clarity.
+            except (
+                tornado.iostream.StreamClosedError,
+                asyncio.TimeoutError,
+                OSError,
+            ):
                 if task.get_name() == self.opts["id"]:
                     log.error("Unable to forward event to local ipc bus")
                 else:
                     peer = task.get_name()
-                    log.warning(
+                    log.debug(
                         "Unable to forward event to cluster peer %s; "
                         "resetting pusher for reconnect",
                         peer,

@@ -2062,23 +2062,47 @@ class ClusterPeerPusher:
         self.pull_port = pull_port
         self.connect_timeout = connect_timeout
         self.pub_sock = None
-        # Serialize publishes: a reused pusher is shared across concurrent
-        # ``publish_payload`` calls, and without a lock two of them would race
-        # on ``self.pub_sock`` (one reconnecting while the other is mid-send),
-        # tearing the connection down and dropping peer events. The blocking
-        # SyncWrapper this replaced serialized implicitly; keep that guarantee.
-        self._lock = asyncio.Lock()
+        # A single in-flight (re)connect, shared by all concurrent publishes.
+        self._connecting = None
+
+    async def _ensure_connected(self):
+        if self.pub_sock is not None and self.pub_sock.connected():
+            return
+        # ``self.pushers`` are reused and shared across concurrent
+        # ``publish_payload`` calls. If each publish reconnected on its own, two
+        # of them would race to replace ``self.pub_sock`` -- one tearing down
+        # the socket another is mid-send on -- dropping peer events.
+        #
+        # The first publish to find the socket down starts one reconnect; the
+        # rest await that same attempt. Concurrent pushes to a still-down peer
+        # share a single timeout (not N), and only one writer ever touches
+        # ``self.pub_sock``.
+        if self._connecting is None:
+            self._connecting = asyncio.ensure_future(self._reconnect())
+        connecting = self._connecting
+        try:
+            await connecting
+        finally:
+            if self._connecting is connecting:
+                self._connecting = None
+
+    async def _reconnect(self):
+        if self.pub_sock is not None:
+            self.pub_sock.close()
+            self.pub_sock = None
+        sock = _TCPPubServerPublisher(self.pull_host, self.pull_port, None)
+        await sock.connect(timeout=self.connect_timeout)
+        self.pub_sock = sock
 
     async def publish(self, payload, **kwargs):
-        async with self._lock:
-            if self.pub_sock is None or not self.pub_sock.connected():
-                if self.pub_sock is not None:
-                    self.pub_sock.close()
-                self.pub_sock = _TCPPubServerPublisher(
-                    self.pull_host, self.pull_port, None
-                )
-                await self.pub_sock.connect(timeout=self.connect_timeout)
-            await self.pub_sock.send(payload)
+        await self._ensure_connected()
+        if self.pub_sock is None or not self.pub_sock.connected():
+            # The connection dropped between connect and send; surface it so the
+            # publish_payload handler resets us for a fresh (timeout-bounded)
+            # reconnect, rather than letting send() fall into its own unbounded,
+            # timeout-less reconnect.
+            raise tornado.iostream.StreamClosedError()
+        await self.pub_sock.send(payload)
 
     def close(self):
         if self.pub_sock is not None:
