@@ -96,3 +96,9 @@ def test_minion_hangs_on_master_failure_50814(
             if event_count > 3:
                 break
             time.sleep(0.5)
+
+    # Wait for the minion to re-connect before the next test touches the
+    # shared multimaster fixtures.  Done here (not via after_start) so the
+    # callback does not persist on the package-scoped daemon and fire for
+    # every subsequent test that starts the master.
+    wait_for_minion(salt_mm_master_1.salt_cli(), salt_mm_minion_1.id)
