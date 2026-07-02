@@ -88,11 +88,15 @@ def non_root_minion(salt_master, salt_factories):
         with factory.started():
             yield factory
     finally:
-        # Stopping the minion does not remove its key from the shared session
-        # master, it only stops the process. Delete the accepted key here;
-        # otherwise it outlives this module and every later test in the session
-        # targeting '*' sees a phantom minion that never returns.
-        salt_master.salt_key_cli(timeout=30).run("-d", factory.id, "-y")
+        # ``factory.started()`` stops the minion daemon but leaves the
+        # minion's accepted key under ``{master_pki_dir}/minions/<id>``.
+        # The subsequent ``test_salt_key.py::test_list_*`` tests in the same
+        # session enumerate PKI keys and fail their expected-list assertions
+        # when this stale key is present.  Delete it explicitly.
+        # ``salt_master.salt_key_cli`` is a *factory* method on the saltfactories
+        # ``SaltMaster``, not an attribute -- it must be called to obtain a
+        # runnable ``SaltKey`` CLI factory.
+        salt_master.salt_key_cli().run("-d", factory.id, "-y")
 
 
 @pytest.mark.skip_if_not_root

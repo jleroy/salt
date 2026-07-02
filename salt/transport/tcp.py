@@ -15,6 +15,7 @@ import os
 import queue
 import socket
 import ssl
+import struct
 import threading
 import time
 import urllib
@@ -1387,64 +1388,44 @@ class PubServer(tornado.tcpserver.TCPServer):
         # Handshake didn't complete after retries - reject
         stream.close()
 
-    async def _write_to_subscriber(self, client, payload):
-        """
-        Write a payload to a single subscriber.
-
-        Returns the client if it should be dropped (the stream closed or the
-        subscriber was too slow to accept the publish), otherwise ``None``.
-        """
-        timeout = self.opts.get("pub_server_publish_timeout", 5)
-        try:
-            await asyncio.wait_for(client.stream.write(payload), timeout)
-        except tornado.iostream.StreamClosedError:
-            return client
-        except (asyncio.TimeoutError, TimeoutError):
-            # The subscriber's receive buffer is full and it is not draining
-            # it. Writing to subscribers sequentially would let this one block
-            # delivery to every other subscriber (head-of-line blocking that
-            # could freeze the whole event bus), so drop it instead; it will
-            # reconnect.
-            log.warning(
-                "Subscriber at %s is too slow to receive publishes, "
-                "disconnecting it to avoid blocking the event bus",
-                client.address,
-            )
-            return client
-        return None
-
     # TODO: ACK the publish through IPC
     async def publish_payload(self, package, topic_list=None):
         log.trace(
             "TCP PubServer sending payload: topic_list=%r %r", topic_list, package
         )
         payload = salt.transport.frame.frame_msg(package)
+        to_remove = []
+        # Start writes to every targeted client concurrently so a single
+        # slow subscriber can't stall delivery to the rest of the fleet.
+        # See https://github.com/saltstack/salt/issues/66282 — sequential
+        # ``yield client.stream.write(...)`` was clogging the event
+        # publisher loop, growing per-client write buffers and eventually
+        # wedging the master.
+        write_futures = []
         if topic_list:
-            targets = []
-            seen = set()
-            clients = list(self.clients)
             for topic in topic_list:
-                matched = False
-                for client in clients:
+                sent = False
+                for client in list(self.clients):
                     if topic == client.id_:
-                        matched = True
-                        if id(client) not in seen:
-                            seen.add(id(client))
-                            targets.append(client)
-                if not matched:
+                        try:
+                            write_futures.append((client, client.stream.write(payload)))
+                            sent = True
+                        except tornado.iostream.StreamClosedError:
+                            to_remove.append(client)
+                if not sent:
                     log.debug("Publish target %s not connected %r", topic, self.clients)
         else:
-            targets = list(self.clients)
-
-        # Write to all subscribers concurrently and with a per-subscriber
-        # timeout so a single slow or stalled subscriber cannot block delivery
-        # to the others.
-        to_remove = await asyncio.gather(
-            *(self._write_to_subscriber(client, payload) for client in targets)
-        )
+            for client in list(self.clients):
+                try:
+                    write_futures.append((client, client.stream.write(payload)))
+                except tornado.iostream.StreamClosedError:
+                    to_remove.append(client)
+        for client, future in write_futures:
+            try:
+                await future
+            except tornado.iostream.StreamClosedError:
+                to_remove.append(client)
         for client in to_remove:
-            if client is None:
-                continue
             log.debug(
                 "Subscriber at %s has disconnected from publisher", client.address
             )
@@ -1536,14 +1517,23 @@ class TCPPuller:
         See https://tornado.readthedocs.io/en/latest/iostream.html#tornado.iostream.IOStream
         for additional details.
         """
-        unpacker = salt.utils.msgpack.Unpacker(raw=False)
+        # Senders frame payloads as ``frame_msg_ipc(...)`` which prefixes
+        # the msgpack body with a 4-byte big-endian length (3006.x
+        # ``d4e2e075aa3``).  The streaming ``msgpack.Unpacker`` was a
+        # 3006.x-era TCPPuller artifact that has no awareness of the
+        # length prefix and reads it as a msgpack int, surfacing as
+        # ``'int' object is not subscriptable`` at ``framed_msg["body"]``.
+        # Mirror ``salt.transport.ipc.IPCServer.handle_stream``: read the
+        # 4-byte length, then exactly that many payload bytes, unpack
+        # once.
         while not stream.closed():
             try:
-                wire_bytes = await stream.read_bytes(4096, partial=True)
-                unpacker.feed(wire_bytes)
-                for framed_msg in unpacker:
-                    body = framed_msg["body"]
-                    self.io_loop.create_task(self.payload_handler(body))
+                length_bytes = await stream.read_bytes(4)
+                length = struct.unpack(">I", length_bytes)[0]
+                payload = await stream.read_bytes(length)
+                framed_msg = salt.utils.msgpack.unpackb(payload, raw=False)
+                body = framed_msg["body"]
+                self.io_loop.create_task(self.payload_handler(body))
             except tornado.iostream.StreamClosedError:
                 if self.path:
                     log.trace("Client disconnected from IPC %s", self.path)
