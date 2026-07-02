@@ -1497,6 +1497,15 @@ class SaltPkgInstall:
                 if p.endswith(self.file_ext):
                     pkg = p
                     break
+        if platform.is_windows() and self.use_prev_version and self.file_ext == "msi":
+            # After a downgrade, the built package (self.pkgs[0]) has been
+            # replaced by prev_version, so uninstall the version actually
+            # installed (downloaded by install_previous under C:\TEMP).
+            pkg = str(
+                pathlib.Path(
+                    r"C:\TEMP", f"Salt-Minion-{self.prev_version}-Py3-AMD64.msi"
+                )
+            )
         if platform.is_windows():
             log.info("Uninstalling %s", pkg)
             if pkg.endswith("exe"):
