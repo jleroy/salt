@@ -136,8 +136,9 @@ def test_bundled_install_uses_sys_executable_not_system_python_69303(mock_pam):
                 encoding="utf-8",
             )
             called_cmd = run_mock.call_args_list[0][0][0]
-            assert f.name in called_cmd, (
-                f"Expected bundled Python {f.name!r} in subprocess argv, "
+            expected = os.path.realpath(f.name)
+            assert expected in called_cmd, (
+                f"Expected bundled Python {expected!r} in subprocess argv, "
                 f"got {called_cmd!r}. __find_pyexe() incorrectly preferred "
                 "the system Python on a relenv/onedir install (regression "
                 "of #69303)."
