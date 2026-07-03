@@ -13,6 +13,7 @@ import salt.utils.files
 import salt.utils.path
 import salt.utils.pkg.rpm
 import salt.utils.platform
+from salt.exceptions import CommandExecutionError
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +36,14 @@ def refresh_db(grains, modules):
     if salt.utils.platform.is_windows():
         modules.winrepo.update_git_repos()
 
-    modules.pkg.refresh_db()
+    try:
+        modules.pkg.refresh_db()
+    except CommandExecutionError as exc:
+        if salt.utils.platform.is_darwin():
+            # Homebrew's CDN (formulae.brew.sh) is intermittently unreachable;
+            # a failed ``brew update`` should skip these tests, not error them.
+            pytest.skip(f"Refreshing the package database failed: {exc}")
+        raise
 
     # If this is Arch Linux, check if pacman is in use by another process
     if grains["os_family"] == "Arch":
