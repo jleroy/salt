@@ -42,15 +42,19 @@ pytestmark = [
     # one or more pip operations, all traced in the parent.  Bump
     # the per-test ceiling to absorb runner variance.
     pytest.mark.timeout(180, func_only=True),
-    # Salt pins the "fork" multiprocessing start method on Linux + Python 3.14
-    # (salt/scripts.py), so forked daemon workers inherit every open fd -- CLOEXEC
-    # only closes on exec(), not fork().  If a worker forks while relenv's
-    # ``system_sysconfig`` has a ``subprocess.run(capture_output=True)`` pipe open,
-    # the worker inherits the write-end, the read never sees EOF, and the test
-    # hangs until pytest-timeout fires.  It's an intermittent fork/pipe race
-    # (a fresh, lightly-loaded process does not hit it), so retry.
-    pytest.mark.flaky(max_runs=3),
 ]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _prewarm_relenv_sysconfig():
+    # Trigger relenv's sysconfig wrapper (a one-shot system-python subprocess)
+    # now, before any daemon worker forks: relenv memoizes it, so the pip states
+    # below never run it. Otherwise a fork while its pipe is open makes the read
+    # hang until the timeout (Linux + the "fork" start method).
+    import sysconfig
+
+    sysconfig.get_paths()
+    sysconfig.get_config_vars()
 
 
 def _win_user_where(username, password, program):
