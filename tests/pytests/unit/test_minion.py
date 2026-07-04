@@ -2013,9 +2013,7 @@ async def test_minion_manager_async_stop(io_loop, minion_opts, socket_tmp_path):
 
         # Fire an event and ensure we can still read it back while the minion
         # is stopping
-        assert (
-            await event.fire_event_async(load, "test_event", timeout=5000) is not False
-        )
+        assert await event.fire_event_async(load, "test_event", timeout=1) is not False
         start = time.monotonic()
         while time.monotonic() - start < 5:
             ret = event.get_event(tag="test_event", wait=1)
