@@ -3089,40 +3089,6 @@ class MasterPubServerChannel:
                 return
         self.pushers.append(pusher)
 
-    async def _publish_to_peer(
-        self, pusher, event_data, description, attempts=5, delay=1.0
-    ):
-        """
-        Push a cluster identity event (``join-reply`` / ``join-notify``) to a
-        single peer, retrying on failure.
-        """
-        for attempt in range(attempts):
-            try:
-                await pusher.publish(event_data)
-                return True
-            except Exception as exc:  # pylint: disable=broad-except
-                if attempt + 1 < attempts:
-                    log.debug(
-                        "Retrying %s to peer %s:%s (attempt %d/%d): %s",
-                        description,
-                        pusher.pull_host,
-                        pusher.pull_port,
-                        attempt + 1,
-                        attempts,
-                        exc,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    log.warning(
-                        "Unable to publish %s to peer %s:%s after %d attempts: %s",
-                        description,
-                        pusher.pull_host,
-                        pusher.pull_port,
-                        attempts,
-                        exc,
-                    )
-        return False
-
     async def handle_pool_publish(self, payload):
         """
         Handle incoming events from cluster peer.
@@ -3550,7 +3516,15 @@ class MasterPubServerChannel:
                     )
 
                     # XXX gather tasks instead of looping
-                    await self._publish_to_peer(pusher, event_data, "join-notify")
+                    try:
+                        await pusher.publish(event_data)
+                    except Exception as exc:  # pylint: disable=broad-except
+                        log.warning(
+                            "Unable to publish join-notify to peer %s:%s: %s",
+                            pusher.pull_host,
+                            pusher.pull_port,
+                            exc,
+                        )
 
                 # XXX Kick off minoins key repair
 
@@ -3631,9 +3605,7 @@ class MasterPubServerChannel:
                         "payload": tosign,
                     },
                 )
-                await self._publish_to_peer(
-                    self.pusher(payload["peer_id"]), event_data, "join-reply"
-                )
+                await self.pusher(payload["peer_id"]).publish(event_data)
                 if state_sync_session_id is not None:
                     asyncio.get_event_loop().create_task(
                         self._send_state_sync_chunks(
