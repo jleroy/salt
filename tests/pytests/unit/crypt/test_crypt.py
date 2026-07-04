@@ -9,6 +9,7 @@ import os.path
 import uuid
 
 import pytest
+from cryptography.hazmat.primitives import serialization
 
 import salt.cache
 import salt.crypt
@@ -187,6 +188,55 @@ def test_master_keys_with_cluster_id(tmp_path, master_opts):
     ]
     # Assert all calls match the pattern
     store_mock.assert_has_calls(expected_calls, any_order=False)
+
+
+def test_reload_cluster_key_reloads_when_cluster_pem_changes(tmp_path, master_opts):
+    master_pki_path = tmp_path / "master_pki"
+    cluster_pki_path = tmp_path / "cluster_pki"
+    master_pki_path.mkdir()
+    cluster_pki_path.mkdir()
+    (cluster_pki_path / "peers").mkdir()
+
+    master_opts["pki_dir"] = str(master_pki_path)
+    master_opts["cluster_id"] = "cluster1"
+    master_opts["cluster_pki_dir"] = str(cluster_pki_path)
+
+    mkeys = salt.crypt.MasterKeys(master_opts)
+    cluster_rsa = cluster_pki_path / "cluster.pem"
+
+    def _pub_pem(private_key):
+        return private_key.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+    original_pub = _pub_pem(mkeys.key)
+    original_mtime = mkeys.cluster_key_mtime
+    assert original_mtime is not None
+
+    # Unchanged on disk: reload is a no-op.
+    mkeys.reload_cluster_key()
+    assert _pub_pem(mkeys.key) == original_pub
+    assert mkeys.cluster_key_mtime == original_mtime
+
+    # Simulate the founder's cluster.pem being installed over the local one.
+    installed = mkeys.find_or_create_keys(name="cluster", force=True)
+    assert _pub_pem(installed) != original_pub
+    os.utime(cluster_rsa, ns=(original_mtime + 10**9, original_mtime + 10**9))
+
+    mkeys.reload_cluster_key()
+    assert _pub_pem(mkeys.key) == _pub_pem(installed)
+    assert mkeys.cluster_key_mtime != original_mtime
+
+
+def test_reload_cluster_key_noop_without_cluster_id(tmp_path, master_opts):
+    master_opts["pki_dir"] = str(tmp_path)
+    assert master_opts["cluster_id"] is None
+
+    mkeys = salt.crypt.MasterKeys(master_opts)
+    key_before = mkeys.key
+    mkeys.reload_cluster_key()
+    assert mkeys.key is key_before
 
 
 def test_pwdata_decrypt():

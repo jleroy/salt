@@ -632,6 +632,7 @@ class ReqServerChannel:
         attributes on the channel see those changes reflected in the auth
         handler without having to construct a new ``AuthFuncs`` themselves.
         """
+        self.master_key.reload_cluster_key()
         af = salt.master.AuthFuncs.__new__(salt.master.AuthFuncs)
         af.opts = self.opts
         af.cache = self.cache
