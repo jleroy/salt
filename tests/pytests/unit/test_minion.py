@@ -1996,8 +1996,11 @@ async def test_minion_manager_async_stop(io_loop, minion_opts, socket_tmp_path):
     # mm.io_loop is now an asyncio.AbstractEventLoop (not Tornado IOLoop)
     assert mm.io_loop.is_running()
 
-    # Wait for the ipc socket to be created, meaning the publish server is listening.
-    while not list(pathlib.Path(minion_opts["sock_dir"]).glob("*")):
+    # Wait for the *pull* ipc socket to be created, meaning the publish server
+    # is listening for pushes. Globbing for any file is not enough: the pub
+    # socket can appear first, letting the test fire before the pull socket
+    # exists, so the pusher's connect fails with StreamClosedError (Linux).
+    while not list(pathlib.Path(minion_opts["sock_dir"]).glob("*_pull.ipc")):
         await tornado.gen.sleep(0.3)
 
     # Set up values for event to send
