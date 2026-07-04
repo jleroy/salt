@@ -21,6 +21,7 @@ import tornado.ioloop
 
 import salt.cache
 import salt.cluster.consensus.rpc
+import salt.cluster.healthchecks
 import salt.crypt
 import salt.master
 import salt.payload
@@ -67,18 +68,25 @@ def _cluster_is_ready(opts):
     Return ``True`` if this master may serve minion/CLI requests.
 
     For non-cluster masters this is always ``True``.  For cluster members it
-    returns ``True`` only after the Raft ``MembershipStateMachine`` has
-    committed a CONFIG entry listing this node as a voter and
-    ``SMaster.secrets["cluster_ready"]["event"]`` has been set.
+    returns ``True`` once the Raft ``MembershipStateMachine`` has committed a
+    CONFIG entry listing this node as a voter, observed either through the
+    in-memory ``SMaster.secrets["cluster_ready"]["event"]`` or, as a fallback
+    for workers that hold a different copy of that event, the on-disk
+    readiness sentinel written by ``mark_cluster_ready``.
     """
     if not opts.get("cluster_id"):
         return True
-    import salt.master  # pylint: disable=import-outside-toplevel
-
     entry = salt.master.SMaster.secrets.get("cluster_ready")
-    if entry is None:
-        return False
-    return entry["event"].is_set()
+    if entry is not None and entry["event"].is_set():
+        return True
+    # The in-memory event is per-process and can be missed by a request
+    # worker spawned into a different generation than the process that set
+    # it. The readiness sentinel lives on the shared cachedir, so any worker
+    # observes it once this node has committed as a voter.
+    base = salt.cluster.healthchecks.health_dir(opts)
+    if base is not None:
+        return (base / salt.cluster.healthchecks.READY_SENTINEL).exists()
+    return False
 
 
 def _transport_has_builtin_router(transport):
