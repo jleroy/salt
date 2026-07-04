@@ -45,16 +45,16 @@ pytestmark = [
 ]
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _prewarm_relenv_sysconfig():
-    # Trigger relenv's sysconfig wrapper (a one-shot system-python subprocess)
-    # now, before any daemon worker forks: relenv memoizes it, so the pip states
-    # below never run it. Otherwise a fork while its pipe is open makes the read
-    # hang until the timeout (Linux + the "fork" start method).
-    import sysconfig
-
-    sysconfig.get_paths()
-    sysconfig.get_config_vars()
+# Import pip's location machinery at collection time -- before any test runs and
+# any salt daemon starts forking. On a relenv onedir this runs relenv's one-shot
+# system-python sysconfig subprocess and memoizes it, so ``pip.installed`` never
+# triggers it mid-run, where a forking daemon inheriting its open pipe makes the
+# read hang until the timeout (Linux + the "fork" start method). Doing it in a
+# fixture is too late: it runs after earlier tests have started those daemons.
+try:
+    import pip._internal.req.constructors  # noqa: F401  pylint: disable=unused-import
+except ImportError:
+    pass
 
 
 def _win_user_where(username, password, program):
