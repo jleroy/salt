@@ -31,6 +31,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 
 import salt._logging
 import salt.defaults.exitcodes
@@ -81,29 +82,39 @@ def daemonize(redirect_out=True):
     # Avoid circular import
     import salt.utils.crypt
 
-    try:
-        pid = os.fork()
-        if pid > 0:
-            # exit first parent
-            os._exit(salt.defaults.exitcodes.EX_OK)
-    except OSError as exc:
-        log.error("fork #1 failed: %s (%s)", exc.errno, exc)
-        sys.exit(salt.defaults.exitcodes.EX_GENERIC)
+    # Logging/transport helper threads may still be alive here, so Python
+    # 3.12+ emits a DeprecationWarning about forking a multi-threaded
+    # process. The double-fork is intentional and the child re-creates its
+    # own resources, so silence the spurious warning to keep stderr clean.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            category=DeprecationWarning,
+            message="This process .* is multi-threaded, use of fork",
+        )
+        try:
+            pid = os.fork()
+            if pid > 0:
+                # exit first parent
+                os._exit(salt.defaults.exitcodes.EX_OK)
+        except OSError as exc:
+            log.error("fork #1 failed: %s (%s)", exc.errno, exc)
+            sys.exit(salt.defaults.exitcodes.EX_GENERIC)
 
-    # decouple from parent environment
-    os.chdir("/")
-    # noinspection PyArgumentList
-    os.setsid()
-    os.umask(0o022)  # pylint: disable=blacklisted-function
+        # decouple from parent environment
+        os.chdir("/")
+        # noinspection PyArgumentList
+        os.setsid()
+        os.umask(0o022)  # pylint: disable=blacklisted-function
 
-    # do second fork
-    try:
-        pid = os.fork()
-        if pid > 0:
-            sys.exit(salt.defaults.exitcodes.EX_OK)
-    except OSError as exc:
-        log.error("fork #2 failed: %s (%s)", exc.errno, exc)
-        sys.exit(salt.defaults.exitcodes.EX_GENERIC)
+        # do second fork
+        try:
+            pid = os.fork()
+            if pid > 0:
+                sys.exit(salt.defaults.exitcodes.EX_OK)
+        except OSError as exc:
+            log.error("fork #2 failed: %s (%s)", exc.errno, exc)
+            sys.exit(salt.defaults.exitcodes.EX_GENERIC)
 
     # A normal daemonization redirects the process output to /dev/null.
     # Unfortunately when a python multiprocess is called the output is
