@@ -1427,14 +1427,31 @@ class SaltPkgInstall:
                 )
                 assert ret.returncode in [0, 3010]
             else:
-                # ret = self.proc.run("start", "/wait", f"\"{pkg_path} /start-minion=0 /S\"")
-                batch_file = pkg_path.parent / "install_nsis.cmd"
-                batch_content = f"start /wait {str(pkg_path)} /start-minion=0 /S"
-                with salt.utils.files.fopen(batch_file, "w") as fp:
-                    fp.write(batch_content)
-                # Now run the batch file
-                ret = self.proc.run("cmd.exe", "/c", str(batch_file), _timeout=900)
-                self._check_retcode(ret)
+                # NSIS installers built before the silent-mode exit fix
+                # (< 3008.2, commit 421a8a8da7) can hang at process exit on
+                # Windows 2025 / 11 24H2+, where the wmic force-kill fallback
+                # the installer relied on no longer exists. The install itself
+                # completes ("Salt installation complete" is logged); only the
+                # process fails to exit. Bound the wait and force-kill a hung
+                # installer tree — the version assertions below confirm the
+                # downgrade actually succeeded.
+                proc = subprocess.Popen(  # nosec
+                    [str(pkg_path), "/start-minion=0", "/S"],
+                )
+                try:
+                    ret = proc.wait(timeout=300)
+                except subprocess.TimeoutExpired:
+                    log.warning(
+                        "NSIS installer %s did not exit; force-killing the "
+                        "hung process tree",
+                        pkg_path,
+                    )
+                    subprocess.run(  # nosec
+                        ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                        check=False,
+                    )
+                else:
+                    assert ret == 0, f"NSIS installer exited with {ret}"
 
             log.debug("Removing installed salt-minion service")
             ret = self.proc.run(str(self.ssm_bin), "remove", "salt-minion", "confirm")
