@@ -133,6 +133,7 @@ async def test_post_with_incorrect_client(http_client):
 
 
 @pytest.mark.slow_test
+@pytest.mark.async_timeout(seconds=120)
 async def test_mem_leak_in_event_listener(http_client, salt_minion, app):
     for i in range(10):
         await http_client.fetch(
