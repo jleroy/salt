@@ -303,6 +303,7 @@ repos:
           - --python-version=3.13
           - -o=requirements/static/pkg/py3.13/linux.lock
 
+      ############### FreeBSD PKG Requirements ###############
       - id: pip-compile
         alias: compile-pkg-linux-3.14-zmq-requirements
         name: Linux Packaging Py3.14 ZeroMQ Requirements
@@ -412,6 +413,7 @@ repos:
           - --no-emit-index-url
           - -o=requirements/static/pkg/py3.13/freebsd.lock
 
+      ############### Darwin PKG Requirements ###############
       - id: pip-compile
         alias: compile-pkg-freebsd-3.14-zmq-requirements
         name: FreeBSD Packaging Py3.14 ZeroMQ Requirements
@@ -434,7 +436,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-darwin-3.9-zmq-requirements
         name: Darwin Packaging Py3.9 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.9/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.9/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -452,7 +454,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-darwin-3.10-zmq-requirements
         name: Darwin Packaging Py3.10 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.10/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.10/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -470,7 +472,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-darwin-3.11-zmq-requirements
         name: Darwin Packaging Py3.11 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.11/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.11/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -488,7 +490,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-darwin-3.12-zmq-requirements
         name: Darwin Packaging Py3.12 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.12/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.12/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -506,7 +508,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-darwin-3.13-zmq-requirements
         name: Darwin Packaging Py3.13 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.13/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|crypto|darwin)\.txt|static/pkg/(darwin\.txt|py3\.13/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -521,6 +523,7 @@ repos:
           - --no-emit-index-url
           - -o=requirements/static/pkg/py3.13/darwin.lock
 
+      ############### Windows PKG Requirements ###############
       - id: pip-compile
         alias: compile-pkg-darwin-3.14-zmq-requirements
         name: Darwin Packaging Py3.14 ZeroMQ Requirements
@@ -543,7 +546,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-windows-3.9-zmq-requirements
         name: Windows Packaging Py3.9 ZeroMQ Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.9/windows\.lock))$
+        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.9/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -562,7 +565,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-windows-3.10-zmq-requirements
         name: Windows Packaging Py3.10 ZeroMQ Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.10/windows\.lock))$
+        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.10/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -581,7 +584,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-windows-3.11-zmq-requirements
         name: Windows Packaging Py3.11 ZeroMQ Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.11/windows\.lock))$
+        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.11/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -600,7 +603,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-windows-3.12-zmq-requirements
         name: Windows Packaging Py3.12 ZeroMQ Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.12/windows\.lock))$
+        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.12/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -619,7 +622,7 @@ repos:
       - id: pip-compile
         alias: compile-pkg-windows-3.13-zmq-requirements
         name: Windows Packaging Py3.13 ZeroMQ Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.13/windows\.lock))$
+        files: ^requirements/(constraints\.txt|(base|zeromq|crypto|windows)\.txt|static/pkg/(windows\.txt|py3\.13/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -743,26 +746,6 @@ repos:
           - -c=requirements/static/pkg/py3.12/linux.lock
           - -o=requirements/static/ci/py3.12/linux.lock
 
-      - id: pip-compile
-        alias: compile-ci-linux-3.14-zmq-requirements
-        name: Linux CI Py3.14 ZeroMQ Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(linux\.txt|common\.txt)|py3\.14/linux\.lock))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/base.txt
-          - requirements/pytest.txt
-          - requirements/zeromq.txt
-          - requirements/static/ci/common.txt
-          - requirements/static/ci/linux.txt
-          - --python-platform=linux
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - --unsafe-package=setuptools
-          - -c=requirements/static/pkg/py3.14/linux.lock
-          - -o=requirements/static/ci/py3.14/linux.lock
 
       - id: pip-compile
         alias: compile-ci-linux-3.13-zmq-requirements
@@ -788,9 +771,32 @@ repos:
       ############### Linux CI Crypto Requirements ###############
 
       - id: pip-compile
+        alias: compile-ci-linux-3.14-zmq-requirements
+        name: Linux CI Py3.14 ZeroMQ Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(linux\.txt|common\.txt)|py3\.14/linux\.lock))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/pytest.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/linux.txt
+          - --python-platform=linux
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/pkg/py3.14/linux.lock
+          - -o=requirements/static/ci/py3.14/linux.lock
+
+      ############### Linux CI Crypto Requirements ###############
+
+      - id: pip-compile
         alias: compile-ci-linux-crypto-3.9-requirements
         name: Linux CI Py3.9 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.9/linux-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.9/linux-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -805,7 +811,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-linux-crypto-3.10-requirements
         name: Linux CI Py3.10 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.10/linux-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.10/linux-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -820,7 +826,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-linux-crypto-3.11-requirements
         name: Linux CI Py3.11 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.11/linux-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.11/linux-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -835,7 +841,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-linux-crypto-3.12-requirements
         name: Linux CI Py3.12 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.12/linux-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.12/linux-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -848,24 +854,9 @@ repos:
           - -o=requirements/static/ci/py3.12/linux-crypto.lock
 
       - id: pip-compile
-        alias: compile-ci-linux-crypto-3.14-requirements
-        name: Linux CI Py3.14 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.14/linux-crypto\.lock))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/static/ci/crypto.txt
-          - --python-platform=linux
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - -o=requirements/static/ci/py3.14/linux-crypto.lock
-
-      - id: pip-compile
         alias: compile-ci-linux-crypto-3.13-requirements
         name: Linux CI Py3.13 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.13/linux-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.13/linux-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -876,6 +867,22 @@ repos:
           - requirements/constraints.txt
           - --no-emit-index-url
           - -o=requirements/static/ci/py3.13/linux-crypto.lock
+
+      ############### FreeBSD CI Requirements ###############
+      - id: pip-compile
+        alias: compile-ci-linux-crypto-3.14-requirements
+        name: Linux CI Py3.14 Crypto Requirements
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.14/linux-crypto\.txt))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/static/ci/crypto.txt
+          - --python-platform=linux
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - -o=requirements/static/ci/py3.14/linux-crypto.lock
 
       ############### FreeBSD CI Requirements ###############
       - id: pip-compile
@@ -966,27 +973,6 @@ repos:
           - -c=requirements/static/pkg/py3.12/freebsd.lock
           - -o=requirements/static/ci/py3.12/freebsd.lock
 
-      - id: pip-compile
-        alias: compile-ci-freebsd-3.14-zmq-requirements
-        name: FreeBSD CI Py3.14 ZeroMQ Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(freebsd|common)\.txt|py3\.14/freebsd\.lock))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/base.txt
-          - requirements/pytest.txt
-          - requirements/zeromq.txt
-          - requirements/static/ci/common.txt
-          - requirements/static/ci/freebsd.txt
-          - requirements/static/pkg/freebsd.txt
-          - --universal
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - --unsafe-package=setuptools
-          - -c=requirements/static/pkg/py3.14/freebsd.lock
-          - -o=requirements/static/ci/py3.14/freebsd.lock
 
       - id: pip-compile
         alias: compile-ci-freebsd-3.13-zmq-requirements
@@ -1012,10 +998,33 @@ repos:
 
       ############### FreeBSD CI Crypto Requirements ###############
       - id: pip-compile
+        alias: compile-ci-freebsd-3.14-zmq-requirements
+        name: FreeBSD CI Py3.14 ZeroMQ Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(freebsd|common)\.txt|py3\.14/freebsd\.lock))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/pytest.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/freebsd.txt
+          - requirements/static/pkg/freebsd.txt
+          - --universal
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/pkg/py3.14/freebsd.lock
+          - -o=requirements/static/ci/py3.14/freebsd.lock
+
+      ############### FreeBSD CI Crypto Requirements ###############
+      - id: pip-compile
         alias: compile-ci-freebsd-crypto-3.9-requirements
         name: FreeBSD CI Py3.9 Crypto Requirements
         files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/crypto\.txt)$
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.9/freebsd-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.9/freebsd-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1031,7 +1040,7 @@ repos:
         alias: compile-ci-freebsd-crypto-3.10-requirements
         name: FreeBSD CI Py3.10 Crypto Requirements
         files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/crypto\.txt)$
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.10/freebsd-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.10/freebsd-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1046,7 +1055,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-freebsd-crypto-3.11-requirements
         name: FreeBSD CI Py3.11 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.11/freebsd-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.11/freebsd-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1061,7 +1070,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-freebsd-crypto-3.12-requirements
         name: FreeBSD CI Py3.12 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.12/freebsd-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.12/freebsd-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1074,24 +1083,9 @@ repos:
           - -o=requirements/static/ci/py3.12/freebsd-crypto.lock
 
       - id: pip-compile
-        alias: compile-ci-freebsd-crypto-3.14-requirements
-        name: FreeBSD CI Py3.14 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.14/freebsd-crypto\.lock))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/static/ci/crypto.txt
-          - --universal
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - -o=requirements/static/ci/py3.14/freebsd-crypto.lock
-
-      - id: pip-compile
         alias: compile-ci-freebsd-crypto-3.13-requirements
         name: FreeBSD CI Py3.13 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.13/freebsd-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.13/freebsd-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1105,9 +1099,25 @@ repos:
 
       ############### Darwin CI Requirements ###############
       - id: pip-compile
+        alias: compile-ci-freebsd-crypto-3.14-requirements
+        name: FreeBSD CI Py3.14 Crypto Requirements
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.14/freebsd-crypto\.txt))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/static/ci/crypto.txt
+          - --universal
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - -o=requirements/static/ci/py3.14/freebsd-crypto.lock
+
+      ############### Darwin CI Requirements ###############
+      - id: pip-compile
         alias: compile-ci-darwin-3.9-zmq-requirements
         name: Darwin CI Py3.9 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.9/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.9/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1129,7 +1139,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-darwin-3.10-zmq-requirements
         name: Darwin CI Py3.10 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.10/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.10/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1151,7 +1161,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-darwin-3.11-zmq-requirements
         name: Darwin CI Py3.11 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.11/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.11/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1173,7 +1183,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-darwin-3.12-zmq-requirements
         name: Darwin CI Py3.12 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.12/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.12/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1192,32 +1202,11 @@ repos:
           - -c=requirements/static/pkg/py3.12/darwin.lock
           - -o=requirements/static/ci/py3.12/darwin.lock
 
-      - id: pip-compile
-        alias: compile-ci-darwin-3.14-zmq-requirements
-        name: Darwin CI Py3.14 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.14/darwin\.lock)))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/base.txt
-          - requirements/darwin.txt
-          - requirements/pytest.txt
-          - requirements/zeromq.txt
-          - requirements/static/ci/common.txt
-          - requirements/static/ci/darwin.txt
-          - --python-platform=macos
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - --unsafe-package=setuptools
-          - -c=requirements/static/pkg/py3.14/darwin.lock
-          - -o=requirements/static/ci/py3.14/darwin.lock
 
       - id: pip-compile
         alias: compile-ci-darwin-3.13-zmq-requirements
         name: Darwin CI Py3.13 ZeroMQ Requirements
-        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.13/darwin\.lock)))$
+        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.13/darwin\.txt)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1238,9 +1227,32 @@ repos:
 
       ############### Darwin CI Crypto Requirements ###############
       - id: pip-compile
+        alias: compile-ci-darwin-3.14-zmq-requirements
+        name: Darwin CI Py3.14 ZeroMQ Requirements
+        files: ^(requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/((ci|pkg)/(darwin|common)\.txt|py3\.14/darwin\.txt)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/darwin.txt
+          - requirements/pytest.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/pkg/py3.14/darwin.lock
+          - -o=requirements/static/ci/py3.14/darwin.lock
+
+      ############### Darwin CI Crypto Requirements ###############
+      - id: pip-compile
         alias: compile-ci-darwin-crypto-3.9-requirements
         name: Darwin CI Py3.9 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.9/darwin-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.9/darwin-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1255,7 +1267,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-darwin-crypto-3.10-requirements
         name: Darwin CI Py3.10 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.10/darwin-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.10/darwin-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1270,7 +1282,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-darwin-crypto-3.11-requirements
         name: Darwin CI Py3.11 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.11/darwin-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.11/darwin-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1285,7 +1297,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-darwin-crypto-3.12-requirements
         name: Darwin CI Py3.12 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.12/darwin-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.12/darwin-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1298,24 +1310,9 @@ repos:
           - -o=requirements/static/ci/py3.12/darwin-crypto.lock
 
       - id: pip-compile
-        alias: compile-ci-darwin-crypto-3.14-requirements
-        name: Darwin CI Py3.14 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.14/darwin-crypto\.lock))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/static/ci/crypto.txt
-          - --python-platform=macos
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - -o=requirements/static/ci/py3.14/darwin-crypto.lock
-
-      - id: pip-compile
         alias: compile-ci-darwin-crypto-3.13-requirements
         name: Darwin CI Py3.13 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.13/darwin-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.13/darwin-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1329,9 +1326,25 @@ repos:
 
       ############### Windows CI Requirements ###############
       - id: pip-compile
+        alias: compile-ci-darwin-crypto-3.14-requirements
+        name: Darwin CI Py3.14 Crypto Requirements
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.14/darwin-crypto\.txt))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/static/ci/crypto.txt
+          - --python-platform=macos
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - -o=requirements/static/ci/py3.14/darwin-crypto.lock
+
+      ############### Windows CI Requirements ###############
+      - id: pip-compile
         alias: compile-ci-windows-3.9-zmq-requirements
         name: Windows CI Py3.9 ZeroMQ Requirements
-        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.9/windows\.lock))$
+        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.9/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1353,7 +1366,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-windows-3.10-zmq-requirements
         name: Windows CI Py3.10 ZeroMQ Requirements
-        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.10/windows\.lock))$
+        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.10/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1375,7 +1388,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-windows-3.11-zmq-requirements
         name: Windows CI Py3.11 ZeroMQ Requirements
-        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.11/windows\.lock))$
+        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.11/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1397,7 +1410,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-windows-3.12-zmq-requirements
         name: Windows CI Py3.12 ZeroMQ Requirements
-        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.12/windows\.lock))$
+        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.12/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1416,32 +1429,11 @@ repos:
           - -c=requirements/static/pkg/py3.12/windows.lock
           - -o=requirements/static/ci/py3.12/windows.lock
 
-      - id: pip-compile
-        alias: compile-ci-windows-3.14-zmq-requirements
-        name: Windows CI Py3.14 ZeroMQ Requirements
-        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.14/windows\.lock))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/base.txt
-          - requirements/pytest.txt
-          - requirements/windows.txt
-          - requirements/zeromq.txt
-          - requirements/static/ci/common.txt
-          - requirements/static/ci/windows.txt
-          - --python-platform=windows
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - --unsafe-package=setuptools
-          - -c=requirements/static/pkg/py3.14/windows.lock
-          - -o=requirements/static/ci/py3.14/windows.lock
 
       - id: pip-compile
         alias: compile-ci-windows-3.13-zmq-requirements
         name: Windows CI Py3.13 ZeroMQ Requirements
-        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.13/windows\.lock))$
+        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.13/windows\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1462,9 +1454,32 @@ repos:
 
       ############### Windows CI Crypto Requirements ###############
       - id: pip-compile
+        alias: compile-ci-windows-3.14-zmq-requirements
+        name: Windows CI Py3.14 ZeroMQ Requirements
+        files: requirements/((base|zeromq|pytest)\.lock|static/((ci|pkg)/(windows|common)\.txt|py3\.14/windows\.txt))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/pytest.txt
+          - requirements/windows.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/windows.txt
+          - --python-platform=windows
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/pkg/py3.14/windows.lock
+          - -o=requirements/static/ci/py3.14/windows.lock
+
+      ############### Windows CI Crypto Requirements ###############
+      - id: pip-compile
         alias: compile-ci-windows-crypto-3.9-requirements
         name: Windows CI Py3.9 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.9/windows-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.9/windows-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1479,7 +1494,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-windows-crypto-3.10-requirements
         name: Windows CI Py3.10 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.10/windows-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.10/windows-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1494,7 +1509,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-windows-crypto-3.11-requirements
         name: Windows CI Py3.11 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.11/windows-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.11/windows-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1509,7 +1524,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-windows-crypto-3.12-requirements
         name: Windows CI Py3.12 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.12/windows-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.12/windows-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1522,24 +1537,9 @@ repos:
           - -o=requirements/static/ci/py3.12/windows-crypto.lock
 
       - id: pip-compile
-        alias: compile-ci-windows-crypto-3.14-requirements
-        name: Windows CI Py3.14 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.14/windows-crypto\.lock))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/static/ci/crypto.txt
-          - --python-platform=windows
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - -o=requirements/static/ci/py3.14/windows-crypto.lock
-
-      - id: pip-compile
         alias: compile-ci-windows-crypto-3.13-requirements
         name: Windows CI Py3.13 Crypto Requirements
-        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.13/windows-crypto\.lock))$
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.13/windows-crypto\.txt))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -1550,6 +1550,26 @@ repos:
           - requirements/constraints.txt
           - --no-emit-index-url
           - -o=requirements/static/ci/py3.13/windows-crypto.lock
+
+  # <---- CI Requirements --------------------------------------------------------------------------------------------
+
+
+  # ----- Cloud CI Requirements ------------------------------------------------------------------------------------->
+
+      - id: pip-compile
+        alias: compile-ci-windows-crypto-3.14-requirements
+        name: Windows CI Py3.14 Crypto Requirements
+        files: ^requirements/(constraints\.txt|crypto\.txt|static/ci/(crypto\.txt|py3\.14/windows-crypto\.txt))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/static/ci/crypto.txt
+          - --python-platform=windows
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - -o=requirements/static/ci/py3.14/windows-crypto.lock
 
   # <---- CI Requirements --------------------------------------------------------------------------------------------
 
@@ -1648,28 +1668,6 @@ repos:
           - -c=requirements/static/pkg/py3.12/linux.lock
           - -o=requirements/static/ci/py3.12/cloud.lock
 
-      - id: pip-compile
-        alias: compile-ci-cloud-3.14-requirements
-        name: Cloud CI Py3.14 Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/(pkg/linux\.txt|ci/((cloud|common)\.txt|py3\.14/cloud\.lock)))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/base.txt
-          - requirements/pytest.txt
-          - requirements/zeromq.txt
-          - requirements/static/ci/common.txt
-          - requirements/static/ci/cloud.txt
-          - requirements/static/pkg/linux.txt
-          - --python-platform=linux
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - --unsafe-package=setuptools
-          - -c=requirements/static/ci/py3.14/linux.lock
-          - -c=requirements/static/pkg/py3.14/linux.lock
-          - -o=requirements/static/ci/py3.14/cloud.lock
 
       - id: pip-compile
         alias: compile-ci-cloud-3.13-requirements
@@ -1693,6 +1691,33 @@ repos:
           - -c=requirements/static/ci/py3.13/linux.lock
           - -c=requirements/static/pkg/py3.13/linux.lock
           - -o=requirements/static/ci/py3.13/cloud.lock
+
+  # <---- Cloud CI Requirements --------------------------------------------------------------------------------------
+
+  # ----- Doc CI Requirements --------------------------------------------------------------------------------------->
+
+      - id: pip-compile
+        alias: compile-ci-cloud-3.14-requirements
+        name: Cloud CI Py3.14 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq|pytest)\.lock|static/(pkg/linux\.txt|ci/((cloud|common)\.txt|py3\.14/cloud\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/pytest.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/cloud.txt
+          - requirements/static/pkg/linux.txt
+          - --python-platform=linux
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.14/linux.lock
+          - -c=requirements/static/pkg/py3.14/linux.lock
+          - -o=requirements/static/ci/py3.14/cloud.lock
 
   # <---- Cloud CI Requirements --------------------------------------------------------------------------------------
 
@@ -1778,25 +1803,6 @@ repos:
           - -c=requirements/static/ci/py3.12/linux.lock
           - -o=requirements/static/ci/py3.12/docs.lock
 
-      - id: pip-compile
-        alias: compile-doc-requirements
-        name: Docs CI Py3.14 Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq|pytest|crypto)\.lock|static/ci/(docs|common|linux)\.txt|static/pkg/linux\.txt|static/pkg/.*/linux\.lock)$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/base.txt
-          - requirements/zeromq.txt
-          - requirements/crypto.txt
-          - requirements/static/ci/docs.txt
-          - --python-platform=linux
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - --unsafe-package=setuptools
-          - -c=requirements/static/ci/py3.14/linux.lock
-          - -o=requirements/static/ci/py3.14/docs.lock
 
       - id: pip-compile
         alias: compile-doc-requirements
@@ -1823,8 +1829,32 @@ repos:
   # ----- Lint CI Requirements -------------------------------------------------------------------------------------->
 
       - id: pip-compile
-        alias: compile-ci-lint-3.9-requirements
-        name: Lint CI Py3.9 Requirements
+        alias: compile-doc-requirements
+        name: Docs CI Py3.14 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq|pytest|crypto)\.lock|static/ci/(docs|common|linux)\.txt|static/pkg/linux\.txt|static/pkg/.*/linux\.lock)$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/crypto.txt
+          - requirements/static/ci/docs.txt
+          - --python-platform=linux
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.14/linux.lock
+          - -o=requirements/static/ci/py3.14/docs.lock
+
+  # <---- Doc CI Requirements ----------------------------------------------------------------------------------------
+
+  # ----- Lint CI Requirements -------------------------------------------------------------------------------------->
+
+      - id: pip-compile
+        alias: compile-ci-lint-linux-3.9-requirements
+        name: Lint CI Linux Py3.9 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.9/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1843,11 +1873,11 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.9/linux.lock
           - -c=requirements/static/pkg/py3.9/linux.lock
-          - -o=requirements/static/ci/py3.9/lint.lock
+          - -o=requirements/static/ci/py3.9/lint-linux.lock
 
       - id: pip-compile
-        alias: compile-ci-lint-3.10-requirements
-        name: Lint CI Py3.10 Requirements
+        alias: compile-ci-lint-linux-3.10-requirements
+        name: Lint CI Linux Py3.10 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.10/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1866,11 +1896,11 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.10/linux.lock
           - -c=requirements/static/pkg/py3.10/linux.lock
-          - -o=requirements/static/ci/py3.10/lint.lock
+          - -o=requirements/static/ci/py3.10/lint-linux.lock
 
       - id: pip-compile
-        alias: compile-ci-lint-3.11-requirements
-        name: Lint CI Py3.11 Requirements
+        alias: compile-ci-lint-linux-3.11-requirements
+        name: Lint CI Linux Py3.11 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.11/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1889,11 +1919,11 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.11/linux.lock
           - -c=requirements/static/pkg/py3.11/linux.lock
-          - -o=requirements/static/ci/py3.11/lint.lock
+          - -o=requirements/static/ci/py3.11/lint-linux.lock
 
       - id: pip-compile
-        alias: compile-ci-lint-3.12-requirements
-        name: Lint CI Py3.12 Requirements
+        alias: compile-ci-lint-linux-3.12-requirements
+        name: Lint CI Linux Py3.12 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.12/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1912,34 +1942,12 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.12/linux.lock
           - -c=requirements/static/pkg/py3.12/linux.lock
-          - -o=requirements/static/ci/py3.12/lint.lock
+          - -o=requirements/static/ci/py3.12/lint-linux.lock
+
 
       - id: pip-compile
-        alias: compile-ci-lint-3.14-requirements
-        name: Lint CI Py3.14 Requirements
-        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.14/linux\.lock)))$
-        pass_filenames: false
-        additional_dependencies: ["pip<26.0"]
-        args:
-          - requirements/base.txt
-          - requirements/zeromq.txt
-          - requirements/static/ci/common.txt
-          - requirements/static/ci/lint.txt
-          - requirements/static/ci/linux.txt
-          - requirements/static/pkg/linux.txt
-          - --python-platform=linux
-          - --python-version=3.14
-          - --constraint
-          - requirements/constraints.txt
-          - --no-emit-index-url
-          - --unsafe-package=setuptools
-          - -c=requirements/static/ci/py3.14/linux.lock
-          - -c=requirements/static/pkg/py3.14/linux.lock
-          - -o=requirements/static/ci/py3.14/lint.lock
-
-      - id: pip-compile
-        alias: compile-ci-lint-3.13-requirements
-        name: Lint CI Py3.13 Requirements
+        alias: compile-ci-lint-linux-3.13-requirements
+        name: Lint CI Linux Py3.13 Requirements
         files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.13/linux\.lock)))$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
@@ -1958,7 +1966,168 @@ repos:
           - --unsafe-package=setuptools
           - -c=requirements/static/ci/py3.13/linux.lock
           - -c=requirements/static/pkg/py3.13/linux.lock
-          - -o=requirements/static/ci/py3.13/lint.lock
+          - -o=requirements/static/ci/py3.13/lint-linux.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-linux-3.14-requirements
+        name: Lint CI Linux Py3.14 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/linux\.txt|ci/(linux\.txt|common\.txt|lint\.txt|py3\.14/linux\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/linux.txt
+          - requirements/static/pkg/linux.txt
+          - --python-platform=linux
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.14/linux.lock
+          - -c=requirements/static/pkg/py3.14/linux.lock
+          - -o=requirements/static/ci/py3.14/lint-linux.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.9-requirements
+        name: Lint CI Darwin Py3.9 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.9/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.9
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.9/darwin.lock
+          - -c=requirements/static/pkg/py3.9/darwin.lock
+          - -o=requirements/static/ci/py3.9/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.10-requirements
+        name: Lint CI Darwin Py3.10 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.10/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.10
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.10/darwin.lock
+          - -c=requirements/static/pkg/py3.10/darwin.lock
+          - -o=requirements/static/ci/py3.10/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.11-requirements
+        name: Lint CI Darwin Py3.11 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.11/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.11
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.11/darwin.lock
+          - -c=requirements/static/pkg/py3.11/darwin.lock
+          - -o=requirements/static/ci/py3.11/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.12-requirements
+        name: Lint CI Darwin Py3.12 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.12/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.12
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.12/darwin.lock
+          - -c=requirements/static/pkg/py3.12/darwin.lock
+          - -o=requirements/static/ci/py3.12/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.13-requirements
+        name: Lint CI Darwin Py3.13 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.13/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.13
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.13/darwin.lock
+          - -c=requirements/static/pkg/py3.13/darwin.lock
+          - -o=requirements/static/ci/py3.13/lint-darwin.lock
+
+      - id: pip-compile
+        alias: compile-ci-lint-darwin-3.14-requirements
+        name: Lint CI Darwin Py3.14 Requirements
+        files: ^requirements/(constraints\.txt|(base|zeromq)\.lock|static/(pkg/darwin\.txt|ci/(darwin\.txt|common\.txt|lint\.txt|py3\.14/darwin\.lock)))$
+        pass_filenames: false
+        additional_dependencies: ["pip<26.0"]
+        args:
+          - requirements/base.txt
+          - requirements/zeromq.txt
+          - requirements/static/ci/common.txt
+          - requirements/static/ci/lint.txt
+          - requirements/static/ci/darwin.txt
+          - requirements/static/pkg/darwin.txt
+          - --python-platform=macos
+          - --python-version=3.14
+          - --constraint
+          - requirements/constraints.txt
+          - --no-emit-index-url
+          - --unsafe-package=setuptools
+          - -c=requirements/static/ci/py3.14/darwin.lock
+          - -c=requirements/static/pkg/py3.14/darwin.lock
+          - -o=requirements/static/ci/py3.14/lint-darwin.lock
 
   # <---- Lint CI Requirements ---------------------------------------------------------------------------------------
 
@@ -2132,7 +2301,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-tools-3.13-requirements
         name: Linux CI Py3.13 Tools Requirements
-        files: ^requirements/static/ci/(tools\.txt|py3\.13/(tools|linux)\.lock)$
+        files: ^requirements/static/ci/(tools\.txt|py3.13/(tools|linux)\.lock)$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -2147,7 +2316,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-tools-3.14-requirements
         name: Linux CI Py3.14 Tools Requirements
-        files: ^requirements/static/ci/(tools\.txt|py3\.14/(tools|linux)\.lock)$
+        files: ^requirements/static/ci/(tools\.txt|py3.14/(tools|linux)\.lock)$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -2228,7 +2397,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-tools-virustotal-3.13-requirements
         name: Linux CI Py3.13 Tools virustotal Requirements
-        files: ^requirements/static/ci/(tools(-virustotal)?\.txt|py3\.13/(tools(-virustotal)?|linux)\.lock)$
+        files: ^requirements/static/ci/(tools(-virustotal)?\.txt|py3.13/(tools(-virustotal)?|linux)\.lock)$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:
@@ -2244,7 +2413,7 @@ repos:
       - id: pip-compile
         alias: compile-ci-tools-virustotal-3.14-requirements
         name: Linux CI Py3.14 Tools virustotal Requirements
-        files: ^requirements/static/ci/(tools(-virustotal)?\.txt|py3\.14/(tools(-virustotal)?|linux)\.lock)$
+        files: ^requirements/static/ci/(tools(-virustotal)?\.txt|py3.14/(tools(-virustotal)?|linux)\.lock)$
         pass_filenames: false
         additional_dependencies: ["pip<26.0"]
         args:

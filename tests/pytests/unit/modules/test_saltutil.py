@@ -260,60 +260,78 @@ def test_client_cmd_as_propagates_error():
             )
 
 
-def test_runner_runs_as_master_user_when_needed():
+def test_runner_drops_to_master_user_when_proxied_from_minion():
+    # No "master_job_cache" in opts => saltutil.runner is proxied from a minion
+    # process. It reloads the real master config and may drop to its user.
     rclient = _FakeClient(ret="in-process")
-    with patch.dict(saltutil.__opts__, {"master_job_cache": "local_cache"}):
-        with patch("salt.runner.RunnerClient", return_value=rclient):
-            with patch.object(saltutil, "_master_user_runas", return_value="salt"):
-                with patch.object(
-                    saltutil, "_client_cmd_as", return_value="dropped"
-                ) as drop:
-                    ret = saltutil.runner("test.ping")
+    with patch.dict(saltutil.__opts__, {"conf_file": "/etc/salt/minion"}):
+        saltutil.__opts__.pop("master_job_cache", None)
+        with patch("salt.config.master_config", return_value={"user": "salt"}):
+            with patch("salt.runner.RunnerClient", return_value=rclient):
+                with patch.object(saltutil, "_master_user_runas", return_value="salt"):
+                    with patch.object(
+                        saltutil, "_client_cmd_as", return_value="dropped"
+                    ) as drop:
+                        ret = saltutil.runner("test.ping")
     assert ret == "dropped"
     drop.assert_called_once()
     assert drop.call_args.args[0] == "salt"
     assert drop.call_args.args[2] == "test.ping"
 
 
-def test_runner_runs_in_process_when_no_drop():
+def test_runner_skips_drop_in_master_context():
+    # "master_job_cache" present => native master execution (e.g.
+    # state.orchestrate, where opts["user"] holds the job's publishing user
+    # such as "sudo_runner"). No privilege drop must be attempted at all.
     rclient = MagicMock()
     rclient.functions = {}
     rclient.cmd.return_value = "in-process"
-    with patch.dict(saltutil.__opts__, {"master_job_cache": "local_cache"}):
+    with patch.dict(
+        saltutil.__opts__, {"master_job_cache": "local_cache", "user": "sudo_runner"}
+    ):
         with patch("salt.runner.RunnerClient", return_value=rclient):
-            with patch.object(saltutil, "_master_user_runas", return_value=None):
+            with patch.object(
+                saltutil, "_master_user_runas", return_value="sudo_runner"
+            ) as runas:
                 with patch.object(saltutil, "_client_cmd_as") as drop:
                     ret = saltutil.runner("test.ping")
     assert ret == "in-process"
+    runas.assert_not_called()
     drop.assert_not_called()
     rclient.cmd.assert_called_once()
 
 
-def test_wheel_runs_as_master_user_when_needed():
+def test_wheel_drops_to_master_user_when_proxied_from_minion():
     wclient = _FakeClient(ret="in-process")
-    with patch.dict(saltutil.__opts__, {"__role": "master"}):
-        with patch("salt.wheel.WheelClient", return_value=wclient):
-            with patch.object(saltutil, "_master_user_runas", return_value="salt"):
-                with patch.object(
-                    saltutil, "_client_cmd_as", return_value="dropped"
-                ) as drop:
-                    ret = saltutil.wheel("key.list_all")
+    with patch.dict(
+        saltutil.__opts__, {"__role": "minion", "conf_file": "/etc/salt/minion"}
+    ):
+        with patch("salt.config.client_config", return_value={"user": "salt"}):
+            with patch("salt.wheel.WheelClient", return_value=wclient):
+                with patch.object(saltutil, "_master_user_runas", return_value="salt"):
+                    with patch.object(
+                        saltutil, "_client_cmd_as", return_value="dropped"
+                    ) as drop:
+                        ret = saltutil.wheel("key.list_all")
     assert ret == "dropped"
     drop.assert_called_once()
     assert drop.call_args.args[0] == "salt"
     assert drop.call_args.args[2] == "key.list_all"
 
 
-def test_wheel_runs_in_process_when_no_drop():
+def test_wheel_skips_drop_in_master_context():
     wclient = MagicMock()
     wclient.functions = {}
     wclient.cmd.return_value = "in-process"
-    with patch.dict(saltutil.__opts__, {"__role": "master"}):
+    with patch.dict(saltutil.__opts__, {"__role": "master", "user": "sudo_runner"}):
         with patch("salt.wheel.WheelClient", return_value=wclient):
-            with patch.object(saltutil, "_master_user_runas", return_value=None):
+            with patch.object(
+                saltutil, "_master_user_runas", return_value="sudo_runner"
+            ) as runas:
                 with patch.object(saltutil, "_client_cmd_as") as drop:
                     ret = saltutil.wheel("key.list_all")
     assert ret == "in-process"
+    runas.assert_not_called()
     drop.assert_not_called()
     wclient.cmd.assert_called_once()
 

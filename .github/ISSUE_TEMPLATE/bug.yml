@@ -63,9 +63,9 @@ body:
         - debian-12
         - debian-13
         - fedora-42
-        - macos-13
         - macos-14
         - macos-15
+        - macos-26
         - opensuse-leap-15.5
         - oraclelinux-8
         - oraclelinux-9

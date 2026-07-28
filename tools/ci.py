@@ -573,6 +573,8 @@ def _os_test_filter(osdef, transport, chunk, arm_runner, requested_slugs):
         "photonos-5-arm64",
         "ubuntu-22.04",
         "ubuntu-22.04-arm64",
+        "macos-26",
+        "macos-26-intel",
     ):
         return False
     return True
@@ -1023,7 +1025,16 @@ def workflow_config(
             for transport in ("zeromq", "tcp"):
                 for chunk in ("unit", "functional", "integration", "scenarios"):
                     splits = _splits.get(chunk) or 1
-                    if full and splits > 1:
+                    if not full:
+                        # PR (non-full) runs don't chunk, to save runners.
+                        # Exception: macOS integration is far slower than
+                        # Linux (spawn vs fork) and times out as a single
+                        # job, so give it two parallel groups.
+                        if platform == "macos" and chunk == "integration":
+                            splits = 2
+                        else:
+                            splits = 1
+                    if splits > 1:
                         for split in range(1, splits + 1):
                             if platform != "linux":
                                 if platform not in test_matrix:

@@ -1,5 +1,6 @@
 import time
 
+import pytest
 from saltfactories.utils import random_string
 
 from tests.conftest import FIPS_TESTRUN
@@ -16,6 +17,11 @@ _MINION_FIPS_OVERRIDES = {
     "encryption_algorithm": "OAEP-SHA224" if FIPS_TESTRUN else "OAEP-SHA1",
     "signing_algorithm": "PKCS1v15-SHA224" if FIPS_TESTRUN else "PKCS1v15-SHA1",
 }
+
+pytestmark = [
+    # GitHub's macOS CI can be really slow sometimes.
+    pytest.mark.timeout_unless_on_windows(180),
+]
 
 
 def test_auth_events_autosign_grains_pend_enabled(salt_master_factory, event_listener):

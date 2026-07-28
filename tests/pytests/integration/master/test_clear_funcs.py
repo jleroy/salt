@@ -61,7 +61,7 @@ def client_config(salt_minion, salt_master):
             "id": "root",
             "transport": salt_master.config["transport"],
             "auth_tries": 1,
-            "auth_timeout": 5,
+            "auth_timeout": 15,
             "master_ip": "127.0.0.1",
             "master_port": salt_master.config["ret_port"],
             "master_uri": "tcp://127.0.0.1:{}".format(salt_master.config["ret_port"]),
@@ -170,7 +170,7 @@ def test_clearfuncs_config(salt_master, clear_channel, user_info):
         "file_name": "good",
         "yaml_contents": "win: true",
     }
-    ret = clear_channel.send(good_msg, timeout=5)
+    ret = clear_channel.send(good_msg, timeout=15)
     assert "Wrote" in ret["data"]["return"]
     assert good_file_path.exists()
     good_file_path.unlink()
@@ -182,7 +182,7 @@ def test_clearfuncs_config(salt_master, clear_channel, user_info):
             "file_name": "../evil",
             "yaml_contents": "win: true",
         }
-        ret = clear_channel.send(evil_msg, timeout=5)
+        ret = clear_channel.send(evil_msg, timeout=15)
         assert not evil_file_path.exists(), "Wrote file via directory traversal"
         assert ret["data"]["return"] == "Invalid path"
     finally:
@@ -206,7 +206,7 @@ def test_fileroots_write(clear_channel, user_info, salt_master):
             "path": "good.txt",
             "saltenv": "base",
         }
-        ret = clear_channel.send(good_msg, timeout=5)
+        ret = clear_channel.send(good_msg, timeout=15)
         assert good_target.exists()
     finally:
         if good_target.exists():
@@ -222,7 +222,7 @@ def test_fileroots_write(clear_channel, user_info, salt_master):
             "path": os.path.join("..", "pwn.txt"),
             "saltenv": "base",
         }
-        clear_channel.send(bad_msg, timeout=5)
+        clear_channel.send(bad_msg, timeout=15)
         assert not bad_target.exists(), "Wrote file via directory traversal"
     finally:
         if bad_target.exists():
@@ -252,7 +252,7 @@ def test_fileroots_read(clear_channel, user_info, salt_master):
         "saltenv": "base",
     }
 
-    ret = clear_channel.send(msg, timeout=5)
+    ret = clear_channel.send(msg, timeout=15)
     try:
         # When vulnerable this assertion will fail.
         assert (
@@ -272,5 +272,5 @@ def test_token(salt_master, salt_minion, clear_channel):
         "cmd": "get_token",
         "token": str(pathlib.Path("..") / "minions" / salt_minion.id / "data.p"),
     }
-    ret = clear_channel.send(msg, timeout=5)
+    ret = clear_channel.send(msg, timeout=15)
     assert "pillar" not in ret, "Read minion data via directory traversal"

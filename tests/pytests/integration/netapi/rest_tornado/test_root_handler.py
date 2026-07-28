@@ -4,6 +4,9 @@ from tornado.httpclient import HTTPError
 import salt.utils.json
 from salt.netapi.rest_tornado import saltnado
 
+# GitHub's macOS CI can be slow.
+pytestmark = [pytest.mark.timeout_unless_on_windows(180)]
+
 
 @pytest.fixture
 def app_urls(salt_sub_minion):
@@ -225,7 +228,11 @@ async def test_simple_local_async_post_no_tgt(http_client):
 
 
 # runner tests
+# ``manage.up`` broadcasts a ping and waits out the full 30 s
+# ``gather_job_timeout`` (set in conftest), which collides with the default
+# 30 s async budget the harness wraps async tests in. Give it room to finish.
 @pytest.mark.slow_test
+@pytest.mark.async_timeout(seconds=120)
 async def test_simple_local_runner_post(http_client, salt_minion, salt_sub_minion):
     low = [{"client": "runner", "fun": "manage.up"}]
     response = await http_client.fetch(
@@ -249,8 +256,8 @@ async def test_simple_local_runner_async_post(http_client):
         "/",
         method="POST",
         body=salt.utils.json.dumps(low),
-        connect_timeout=10,
-        request_timeout=10,
+        connect_timeout=30,
+        request_timeout=30,
     )
     response_obj = salt.utils.json.loads(response.body)
     assert "return" in response_obj

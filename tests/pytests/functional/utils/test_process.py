@@ -265,11 +265,8 @@ def test_process_unseeded_logging_options():
     Regression test for issue #68332.
     """
 
-    def target():
-        pass
-
     salt._logging.set_logging_options_dict.__options_dict__ = None
-    proc = salt.utils.process.Process(target=target)
+    proc = salt.utils.process.Process(target=_noop_target)
     proc.start()
     proc.join()
     assert proc.exitcode == 0

@@ -546,6 +546,7 @@ class MasterKeys(dict):
         self.cluster_pub_path = None
         self.cluster_rsa_path = None
         self.cluster_key = None
+        self.cluster_key_mtime = None
         # XXX
         if self.opts["cluster_id"]:
             self.cluster_pub_path = os.path.join(
@@ -646,6 +647,10 @@ class MasterKeys(dict):
                 name="cluster",
                 passphrase=key_pass,
             )
+            try:
+                self.cluster_key_mtime = os.stat(self.cluster_rsa_path).st_mtime_ns
+            except OSError:
+                self.cluster_key_mtime = None
 
         if self.opts["master_sign_pubkey"]:
             # if only the signature is available, use that
@@ -688,6 +693,30 @@ class MasterKeys(dict):
                 self.sign_key = self.find_or_create_keys(
                     name=self.opts["master_sign_key_name"], passphrase=key_pass
                 )
+
+    def reload_cluster_key(self):
+        """
+        Reload the cluster RSA key if ``cluster.pem`` changed on disk.
+
+        A joiner master generates its own ``cluster.pem`` at startup, then
+        installs the founder's over it once the join-reply arrives. Auth
+        workers cache the key when they start, so without this reload they
+        keep decrypting minion tokens with the stale self-generated key and
+        every minion sign-in to that master fails.
+        """
+        if not self.opts["cluster_id"] or not self.cluster_rsa_path:
+            return
+        try:
+            mtime = os.stat(self.cluster_rsa_path).st_mtime_ns
+        except OSError:
+            return
+        if mtime == self.cluster_key_mtime:
+            return
+        key_pass = salt.utils.sdb.sdb_get(self.opts["cluster_key_pass"], self.opts)
+        self.cluster_key = self.key = self.find_or_create_keys(
+            name="cluster", passphrase=key_pass
+        )
+        self.cluster_key_mtime = mtime
 
     def find_or_create_keys(
         self, name=None, passphrase=None, keysize=None, cache=None, force=False

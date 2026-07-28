@@ -13,6 +13,7 @@ import salt.master
 import salt.payload
 import salt.utils.event
 import salt.utils.files
+import salt.utils.platform
 import salt.utils.stringutils
 from salt.master import SMaster
 from tests.support.mock import AsyncMock, MagicMock, patch
@@ -637,9 +638,11 @@ async def test__auth_cmd_stats_passing(auth_master_opts):
     req = server.ReqServerChannel(opts, None)
 
     fake_ret = {"enc": "clear", "load": b"FAKELOAD"}
+    is_darwin = salt.utils.platform.is_darwin()
 
     def _auth_mock(*_, **__):
-        time.sleep(0.03)
+        # macOS CI is much slower than Linux one...
+        time.sleep(0.25 if is_darwin else 0.03)
         return fake_ret
 
     with patch.object(req, "_auth", _auth_mock), patch(
@@ -661,8 +664,15 @@ async def test__auth_cmd_stats_passing(auth_master_opts):
         payload_handler.assert_called_once()
         assert payload_handler.call_args[0][0]["cmd"] == "_auth"
         auth_call_duration = cur_time - payload_handler.call_args[0][0]["_start"]
-        assert auth_call_duration >= 0.03
-        assert auth_call_duration < 0.05
+
+        # macOS CI is much slower than Linux one...
+        if is_darwin:
+            assert auth_call_duration >= 0.25
+            assert auth_call_duration < 0.50
+
+        else:
+            assert auth_call_duration >= 0.03
+            assert auth_call_duration < 0.05
 
 
 # ============================================================================

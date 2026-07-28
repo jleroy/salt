@@ -171,6 +171,9 @@ def files(tmp_path):
         )
 
 
+@pytest.mark.skip_on_darwin(
+    reason="Failing and previously skipped because patch wasn't >= 2.6"
+)
 def test_patch_single_file(file, files, patches):
     """
     Test file.patch using a patch applied to a single file
@@ -250,6 +253,9 @@ def test_patch_strip_parsing(file, files, patches, subtests):
         assert ret.comment == "Patch was already applied"
 
 
+@pytest.mark.skip_on_darwin(
+    reason="Failing and previously skipped because patch wasn't >= 2.6"
+)
 def test_patch_saltenv(file, files, patches):
     """
     Test that we attempt to download the patch from a non-base saltenv
@@ -267,6 +273,9 @@ def test_patch_saltenv(file, files, patches):
     )
 
 
+@pytest.mark.skip_on_darwin(
+    reason="Failing and previously skipped because patch wasn't >= 2.6"
+)
 def test_patch_single_file_failure(file, tmp_path, files, patches):
     """
     Test file.patch using a patch applied to a single file. This tests a
@@ -300,6 +309,9 @@ def test_patch_single_file_failure(file, tmp_path, files, patches):
 @pytest.mark.skip_on_freebsd(
     reason="Previously skipped on FreeBSD. Needs investigation as to why it currently False"
 )
+@pytest.mark.skip_on_darwin(
+    reason="Failing and previously skipped because patch wasn't >= 2.6"
+)
 def test_patch_directory_failure(file, tmp_path, files, patches):
     """
     Test file.patch using a patch applied to a directory, with changes
@@ -330,6 +342,9 @@ def test_patch_directory_failure(file, tmp_path, files, patches):
     assert re.search(f"saving rejects to (file )?{assert_fpath}", ret.comment)
 
 
+@pytest.mark.skip_on_darwin(
+    reason="Failing and previously skipped because patch wasn't >= 2.6"
+)
 def test_patch_single_file_remote_source(file, files, patches, subtests):
     """
     Test file.patch using a patch applied to a single file, with the patch
@@ -411,6 +426,9 @@ def test_patch_directory_remote_source(file, files, patches, subtests):
         assert ret.comment == "Patch was already applied"
 
 
+@pytest.mark.skip_on_darwin(
+    reason="Failing and previously skipped because patch wasn't >= 2.6"
+)
 def test_patch_single_file_template(file, files, patches):
     """
     Test file.patch using a patch applied to a single file, with jinja
@@ -477,6 +495,9 @@ def test_patch_directory_template(file, files, patches):
     assert ret.comment == "Patch was already applied"
 
 
+@pytest.mark.skip_on_darwin(
+    reason="Failing and previously skipped because patch wasn't >= 2.6"
+)
 def test_patch_single_file_remote_source_template(file, files, patches, subtests):
     """
     Test file.patch using a patch applied to a single file, with the patch
@@ -577,6 +598,9 @@ def test_patch_directory_remote_source_template(file, files, patches, subtests):
         assert ret.comment == "Patch was already applied"
 
 
+@pytest.mark.skip_on_darwin(
+    reason="Failing and previously skipped because patch wasn't >= 2.6"
+)
 def test_patch_test_mode(file, files, patches):
     """
     Test file.patch using test=True

@@ -514,13 +514,11 @@ def _run(
         # the command under bash as a login shell
         try:
             # Do not rely on populated __salt__ dict (ie avoid __salt__['user.info'])
-            user_shell = [x for x in pwd.getpwall() if x.pw_name == runas][0].pw_shell
-            if re.search("bash$", user_shell):
-                cmd = "{shell} -l -c {cmd}".format(
-                    shell=user_shell, cmd=_cmd_quote(cmd)
-                )
-        except (AttributeError, IndexError):
-            pass
+            user_shell = pwd.getpwnam(runas).pw_shell
+            if user_shell.endswith("/bash"):
+                cmd = f"{user_shell} -l -c {_cmd_quote(cmd)}"
+        except KeyError:
+            raise CommandExecutionError(f"User '{runas}' is not available")
 
         # Ensure the login is simulated correctly (note: su runs sh, not bash,
         # which causes the environment to be initialised incorrectly, which is
@@ -3118,7 +3116,17 @@ def script(
         }
         shell = extension_map.get(ext)
 
-    path = salt.utils.files.mkstemp(dir=cwd, suffix=ext)
+    # When running as a different user on macOS, the script cannot live in the
+    # default temp directory: ``$TMPDIR`` is a per-user, mode-0700 directory, so
+    # even after chowning the file the target user cannot traverse the parent
+    # directory. Fall back to a world-traversable location, unless an explicit
+    # ``cwd`` was provided. Only the script file location changes here; the
+    # ``cwd`` passed to ``_run`` below is left untouched.
+    script_dir = cwd
+    if script_dir is None and runas is not None and salt.utils.platform.is_darwin():
+        script_dir = "/tmp"
+
+    path = salt.utils.files.mkstemp(dir=script_dir, suffix=ext)
 
     if template:
         if "pillarenv" in kwargs or "pillar" in kwargs:
@@ -3509,8 +3517,16 @@ def exec_code_all(lang, code, cwd=None, args=None, **kwargs):
     """
     powershell = lang.lower().startswith("powershell")
 
+    runas = kwargs.get("runas")
+
     if powershell:
         codefile = salt.utils.files.mkstemp(suffix=".ps1")
+    elif runas is not None and salt.utils.platform.is_darwin():
+        # On macOS, mkstemp() uses ``$TMPDIR``, a user-specific directory whose
+        # parent components are mode 700 and therefore not traversable by other
+        # users accounts. When ``runas`` is specified, we save the script to
+        # the system tmp dir which can be accessed by other users accounts.
+        codefile = salt.utils.files.mkstemp(dir="/tmp")
     else:
         codefile = salt.utils.files.mkstemp()
 
@@ -3538,7 +3554,6 @@ def exec_code_all(lang, code, cwd=None, args=None, **kwargs):
                 exc_info_on_loglevel=logging.DEBUG,
             )
 
-    runas = kwargs.get("runas")
     if runas is not None:
         if not salt.utils.platform.is_windows():
             os.chown(codefile, __salt__["file.user_to_uid"](runas), -1)

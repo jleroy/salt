@@ -887,14 +887,29 @@ def get_source_sum(
         try:
             proto = urllib.parse.urlparse(source_hash).scheme
             if proto in salt.utils.files.VALID_PROTOS:
-                hash_fn = __salt__["cp.cache_file"](
-                    source_hash, saltenv, verify_ssl=verify_ssl
-                )
+                try:
+                    hash_fn = __salt__["cp.cache_file"](
+                        source_hash, saltenv, verify_ssl=verify_ssl
+                    )
+                except (MinionError, CommandExecutionError) as exc:
+                    # Re-raise with HTTP basic-auth credentials redacted so
+                    # they are not leaked in the error/state comment (issue
+                    # #60203). The underlying error (SSL verification failure,
+                    # connection error, ...) is preserved so callers still see
+                    # the real cause. We re-raise the same exception type as
+                    # the one originally raised so the propagation behavior is
+                    # unchanged (e.g. a MinionError keeps bubbling up past
+                    # get_managed instead of being swallowed into a comment).
+                    raise type(exc)(
+                        "Error retrieving source hash file "
+                        f"{salt.utils.url.redact_http_basic_auth(source_hash)}"
+                        f". {salt.utils.url.redact_http_basic_auth(str(exc))}"
+                    ) from exc
                 if not hash_fn:
                     raise CommandExecutionError(
-                        "Source hash file {} not found".format(
-                            salt.utils.url.redact_http_basic_auth(source_hash)
-                        )
+                        "Error retrieving source hash file "
+                        f"{salt.utils.url.redact_http_basic_auth(source_hash)}"
+                        ". Not found."
                     )
                 if source_hash_sig:
                     _check_sig(

@@ -31,6 +31,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 
 import salt._logging
 import salt.defaults.exitcodes
@@ -81,29 +82,39 @@ def daemonize(redirect_out=True):
     # Avoid circular import
     import salt.utils.crypt
 
-    try:
-        pid = os.fork()
-        if pid > 0:
-            # exit first parent
-            os._exit(salt.defaults.exitcodes.EX_OK)
-    except OSError as exc:
-        log.error("fork #1 failed: %s (%s)", exc.errno, exc)
-        sys.exit(salt.defaults.exitcodes.EX_GENERIC)
+    # Logging/transport helper threads may still be alive here, so Python
+    # 3.12+ emits a DeprecationWarning about forking a multi-threaded
+    # process. The double-fork is intentional and the child re-creates its
+    # own resources, so silence the spurious warning to keep stderr clean.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            category=DeprecationWarning,
+            message="This process .* is multi-threaded, use of fork",
+        )
+        try:
+            pid = os.fork()
+            if pid > 0:
+                # exit first parent
+                os._exit(salt.defaults.exitcodes.EX_OK)
+        except OSError as exc:
+            log.error("fork #1 failed: %s (%s)", exc.errno, exc)
+            sys.exit(salt.defaults.exitcodes.EX_GENERIC)
 
-    # decouple from parent environment
-    os.chdir("/")
-    # noinspection PyArgumentList
-    os.setsid()
-    os.umask(0o022)  # pylint: disable=blacklisted-function
+        # decouple from parent environment
+        os.chdir("/")
+        # noinspection PyArgumentList
+        os.setsid()
+        os.umask(0o022)  # pylint: disable=blacklisted-function
 
-    # do second fork
-    try:
-        pid = os.fork()
-        if pid > 0:
-            sys.exit(salt.defaults.exitcodes.EX_OK)
-    except OSError as exc:
-        log.error("fork #2 failed: %s (%s)", exc.errno, exc)
-        sys.exit(salt.defaults.exitcodes.EX_GENERIC)
+        # do second fork
+        try:
+            pid = os.fork()
+            if pid > 0:
+                sys.exit(salt.defaults.exitcodes.EX_OK)
+        except OSError as exc:
+            log.error("fork #2 failed: %s (%s)", exc.errno, exc)
+            sys.exit(salt.defaults.exitcodes.EX_GENERIC)
 
     # A normal daemonization redirects the process output to /dev/null.
     # Unfortunately when a python multiprocess is called the output is
@@ -957,6 +968,16 @@ class Process(multiprocessing.Process):
         logging_config = state["logging_config"]
         # This will invoke __init__ of the most derived class.
         self.__init__(*args, **kwargs)
+        # Re-seed the pickling args/kwargs. During unpickling, __new__ runs
+        # with no arguments, so the capture there leaves these empty. Without
+        # restoring them here, an object that is pickled a second time (e.g.
+        # carried inside a ProcessManager ``_process_map`` into an
+        # already-spawned process that then spawns a further child) would emit
+        # empty args from __getstate__, and __setstate__ would call __init__()
+        # with no arguments -- breaking subclasses with required positional
+        # arguments such as salt.master.EventMonitor(opts, ipc_publisher).
+        self._args_for_getstate = copy.copy(args)
+        self._kwargs_for_getstate = copy.copy(kwargs)
         # Override self.__logging_config__ with what's in state
         self.__logging_config__ = logging_config
         for function, args, kwargs in state["after_fork_methods"]:

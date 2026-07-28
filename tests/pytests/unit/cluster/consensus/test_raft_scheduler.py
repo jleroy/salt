@@ -33,7 +33,12 @@ def threaded_scheduler():
 def test_threaded_timeout_scheduler(threaded_scheduler):
     moc = Mock()
     threaded_scheduler.schedule(0.01, moc)
-    time.sleep(0.021)
+    # Poll until the callback fires instead of relying on a fixed sleep, which
+    # is racy on a loaded CI host where the daemon thread may not be scheduled
+    # within a short fixed window.
+    deadline = time.monotonic() + 5
+    while not moc.called and time.monotonic() < deadline:
+        time.sleep(0.01)
     moc.assert_called_once()
 
 
@@ -73,6 +78,19 @@ def test_manual_timeout_scheduler_order():
     assert sch.advance_clock_to_next_timeout() is True
     sch.process_timeouts()
     assert calls == ["a", "b"]
+
+
+def test_manual_timeout_scheduler_no_loss_on_time_collision():
+    # Callbacks scheduled for the same instant must all fire. Keying the
+    # timeout dict by bare time dropped colliding timers, so two Raft nodes
+    # drawing the same randomized election timeout lost one node's timer and
+    # it never started its election.
+    sch = ManualTimeoutScheduler()
+    fired = []
+    for i in range(5):
+        sch.schedule(0.15, lambda i=i: fired.append(i))
+    sch.process_existing_timeouts()
+    assert sorted(fired) == [0, 1, 2, 3, 4]
 
 
 def test_async_timeout_scheduler_callback():
@@ -126,7 +144,12 @@ def test_threaded_scheduler_exception_in_callback_is_caught():
             raise RuntimeError("boom in callback")
 
         scheduler.schedule(0.001, bad_callback)
-        time.sleep(0.05)
+        # Poll until the callback fires instead of relying on a fixed sleep,
+        # which is racy on a loaded CI host where the daemon thread may not be
+        # scheduled within a short fixed window.
+        deadline = time.monotonic() + 5
+        while not called and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert called, "bad_callback must have been called"
         # Thread must still be alive after the exception
         assert scheduler._thread.is_alive()
@@ -172,15 +195,12 @@ def test_async_timeout_scheduler_stop_is_noop():
 
 def test_timeout_scheduler_process_timeouts_fires_past_due():
     """TimeoutScheduler.process_timeouts fires callbacks that are past due."""
-    import time
-
     from salt.cluster.consensus.raft.scheduler import TimeoutScheduler
 
     scheduler = TimeoutScheduler()
     fired = []
-    # Schedule with 0 delay → immediately past due
-    t = time.monotonic()
-    scheduler.timeouts[t - 0.1] = lambda: fired.append(1)
+    # Negative delay → immediately past due
+    scheduler.schedule(-0.1, lambda: fired.append(1))
     scheduler.process_timeouts()
     assert fired == [1]
 

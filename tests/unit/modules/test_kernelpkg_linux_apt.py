@@ -27,6 +27,7 @@ except ImportError:
     HAS_MODULES = False
 
 
+@pytest.mark.skip_unless_on_linux(reason="Linux-only module (APT/DEB)")
 @pytest.mark.skipif(not HAS_MODULES, reason="Salt modules could not be loaded")
 class AptKernelPkgTestCase(KernelPkgTestCase, TestCase, LoaderModuleMockMixin):
     """

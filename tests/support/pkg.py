@@ -1427,14 +1427,31 @@ class SaltPkgInstall:
                 )
                 assert ret.returncode in [0, 3010]
             else:
-                # ret = self.proc.run("start", "/wait", f"\"{pkg_path} /start-minion=0 /S\"")
-                batch_file = pkg_path.parent / "install_nsis.cmd"
-                batch_content = f"start /wait {str(pkg_path)} /start-minion=0 /S"
-                with salt.utils.files.fopen(batch_file, "w") as fp:
-                    fp.write(batch_content)
-                # Now run the batch file
-                ret = self.proc.run("cmd.exe", "/c", str(batch_file), _timeout=900)
-                self._check_retcode(ret)
+                # NSIS installers built before the silent-mode exit fix
+                # (< 3008.2, commit 421a8a8da7) can hang at process exit on
+                # Windows 2025 / 11 24H2+, where the wmic force-kill fallback
+                # the installer relied on no longer exists. The install itself
+                # completes ("Salt installation complete" is logged); only the
+                # process fails to exit. Bound the wait and force-kill a hung
+                # installer tree — the version assertions below confirm the
+                # downgrade actually succeeded.
+                proc = subprocess.Popen(  # nosec
+                    [str(pkg_path), "/start-minion=0", "/S"],
+                )
+                try:
+                    ret = proc.wait(timeout=300)
+                except subprocess.TimeoutExpired:
+                    log.warning(
+                        "NSIS installer %s did not exit; force-killing the "
+                        "hung process tree",
+                        pkg_path,
+                    )
+                    subprocess.run(  # nosec
+                        ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                        check=False,
+                    )
+                else:
+                    assert ret == 0, f"NSIS installer exited with {ret}"
 
             log.debug("Removing installed salt-minion service")
             ret = self.proc.run(str(self.ssm_bin), "remove", "salt-minion", "confirm")
@@ -1497,6 +1514,15 @@ class SaltPkgInstall:
                 if p.endswith(self.file_ext):
                     pkg = p
                     break
+        if platform.is_windows() and self.use_prev_version and self.file_ext == "msi":
+            # After a downgrade, the built package (self.pkgs[0]) has been
+            # replaced by prev_version, so uninstall the version actually
+            # installed (downloaded by install_previous under C:\TEMP).
+            pkg = str(
+                pathlib.Path(
+                    r"C:\TEMP", f"Salt-Minion-{self.prev_version}-Py3-AMD64.msi"
+                )
+            )
         if platform.is_windows():
             log.info("Uninstalling %s", pkg)
             if pkg.endswith("exe"):

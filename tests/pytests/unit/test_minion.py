@@ -20,7 +20,6 @@ import salt.modules.test as test_mod
 import salt.syspaths
 import salt.utils.crypt
 import salt.utils.jid
-import salt.utils.platform
 import salt.utils.process
 import salt.utils.state
 from salt._compat import ipaddress
@@ -2043,15 +2042,13 @@ async def test_connect_master_general_exception_error(minion_opts, connect_maste
     assert minion.connect_master.calls == 2
 
 
-async def test_minion_manager_async_stop(io_loop, minion_opts, tmp_path):
+async def test_minion_manager_async_stop(io_loop, minion_opts, socket_tmp_path):
     """
     Ensure MinionManager's stop method works correctly and calls the
     stop_async method
     """
-    # Setup sock_dir with short path
-    minion_opts["sock_dir"] = str(tmp_path / "sock")
 
-    os.makedirs(minion_opts["sock_dir"])
+    minion_opts["sock_dir"] = str(socket_tmp_path)
 
     # Create a MinionManager instance with a mock minion
     mm = salt.minion.MinionManager(minion_opts)
@@ -2069,8 +2066,11 @@ async def test_minion_manager_async_stop(io_loop, minion_opts, tmp_path):
     # mm.io_loop is now an asyncio.AbstractEventLoop (not Tornado IOLoop)
     assert mm.io_loop.is_running()
 
-    # Wait for the ipc socket to be created, meaning the publish server is listening.
-    while not list(pathlib.Path(minion_opts["sock_dir"]).glob("*")):
+    # Wait for the *pull* ipc socket to be created, meaning the publish server
+    # is listening for pushes. Globbing for any file is not enough: the pub
+    # socket can appear first, letting the test fire before the pull socket
+    # exists, so the pusher's connect fails with StreamClosedError (Linux).
+    while not list(pathlib.Path(minion_opts["sock_dir"]).glob("*_pull.ipc")):
         await tornado.gen.sleep(0.3)
 
     # Set up values for event to send

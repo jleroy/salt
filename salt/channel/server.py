@@ -21,6 +21,7 @@ import tornado.ioloop
 
 import salt.cache
 import salt.cluster.consensus.rpc
+import salt.cluster.healthchecks
 import salt.crypt
 import salt.master
 import salt.payload
@@ -67,18 +68,25 @@ def _cluster_is_ready(opts):
     Return ``True`` if this master may serve minion/CLI requests.
 
     For non-cluster masters this is always ``True``.  For cluster members it
-    returns ``True`` only after the Raft ``MembershipStateMachine`` has
-    committed a CONFIG entry listing this node as a voter and
-    ``SMaster.secrets["cluster_ready"]["event"]`` has been set.
+    returns ``True`` once the Raft ``MembershipStateMachine`` has committed a
+    CONFIG entry listing this node as a voter, observed either through the
+    in-memory ``SMaster.secrets["cluster_ready"]["event"]`` or, as a fallback
+    for workers that hold a different copy of that event, the on-disk
+    readiness sentinel written by ``mark_cluster_ready``.
     """
     if not opts.get("cluster_id"):
         return True
-    import salt.master  # pylint: disable=import-outside-toplevel
-
     entry = salt.master.SMaster.secrets.get("cluster_ready")
-    if entry is None:
-        return False
-    return entry["event"].is_set()
+    if entry is not None and entry["event"].is_set():
+        return True
+    # The in-memory event is per-process and can be missed by a request
+    # worker spawned into a different generation than the process that set
+    # it. The readiness sentinel lives on the shared cachedir, so any worker
+    # observes it once this node has committed as a voter.
+    base = salt.cluster.healthchecks.health_dir(opts)
+    if base is not None:
+        return (base / salt.cluster.healthchecks.READY_SENTINEL).exists()
+    return False
 
 
 def _transport_has_builtin_router(transport):
@@ -624,6 +632,7 @@ class ReqServerChannel:
         attributes on the channel see those changes reflected in the auth
         handler without having to construct a new ``AuthFuncs`` themselves.
         """
+        self.master_key.reload_cluster_key()
         af = salt.master.AuthFuncs.__new__(salt.master.AuthFuncs)
         af.opts = self.opts
         af.cache = self.cache
@@ -1326,7 +1335,7 @@ class PubServerChannel:
 
     def __setstate__(self, state):
         self.opts = state["opts"]
-        self.state = state["presence_events"]
+        self.presence_events = state["presence_events"]
         self.transport = state["transport"]
         self.event = salt.utils.event.get_event("master", opts=self.opts, listen=False)
         self.ckminions = salt.utils.minions.CkMinions(self.opts)
@@ -1585,6 +1594,9 @@ class MasterPubServerChannel:
         transport,
         presence_events=False,
     ):
+        # NOTE: on spawning platforms this object is rebuilt via __setstate__,
+        # not __init__. Any attribute added here must also be added to
+        # __setstate__ below, or it will be missing in spawned processes.
         self.opts = opts
         self.transport = transport
         self.io_loop = tornado.ioloop.IOLoop.current()
@@ -2813,9 +2825,20 @@ class MasterPubServerChannel:
         }
 
     def __setstate__(self, state):
+        # Mirror __init__ for the attributes that are not carried in the
+        # pickled state: on spawning platforms this object is reconstructed
+        # via __setstate__ (not __init__), so anything __init__ sets must be
+        # re-established here or it goes missing (e.g. ``cluster_peers`` used
+        # by ``send_aes_key_event`` and ``master_key`` used to sign events).
         self.opts = state["opts"]
         self.transport = state["transport"]
+        self.io_loop = tornado.ioloop.IOLoop.current()
+        self.master_key = salt.crypt.MasterKeys(self.opts)
+        self.peer_keys = {}
+        self.cluster_peers = self.opts["cluster_peers"]
         self._discover_event = None
+        self._discover_token = None
+        self._discover_candidates = {}
         self._raft_dispatcher = None
         self._raft_service = None
 
@@ -2839,6 +2862,15 @@ class MasterPubServerChannel:
     def _publish_daemon(self, **kwargs):
         """Clean implementation: separate local IPC from cluster peer communication."""
         import salt.master  # pylint: disable=import-outside-toplevel
+
+        # On spawning platforms this runs in a fresh interpreter where the
+        # ``SMaster.secrets`` class attribute is empty. ``pre_fork`` forwards
+        # the parent's secrets as a kwarg precisely so we can re-seed them
+        # here; without this, publish_payload / send_aes_key_event raise
+        # ``KeyError: 'aes'`` when reading the AES key.
+        secrets = kwargs.get("secrets")
+        if secrets is not None:
+            salt.master.SMaster.secrets = secrets
 
         if (
             self.opts.get("event_publisher_niceness")
@@ -3028,10 +3060,15 @@ class MasterPubServerChannel:
     def pusher(self, peer, port=None):
         if port is None:
             port = self.tcp_master_pool_port
-        return salt.transport.tcp.PublishServer(
-            self.opts,
-            pull_host=peer,
-            pull_port=port,
+        # Async, non-blocking pusher: a push to a not-yet-started peer (normal
+        # during cluster bring-up) must never block the event io_loop, or it
+        # starves delivery of local events like the master's own
+        # ``salt/master/<id>/start``. The connect is capped by
+        # ``cluster_peer_connect_timeout`` (default 5s) so it also fails fast.
+        return salt.transport.tcp.ClusterPeerPusher(
+            peer,
+            int(port),
+            connect_timeout=self.opts.get("cluster_peer_connect_timeout", 5),
         )
 
     def _add_pusher(self, pusher):
@@ -3721,8 +3758,23 @@ class MasterPubServerChannel:
                 if peer == master_id:
                     log.debug("Skip our own cluster peer event %s", tag)
                     return
-                aes = data["peers"][master_id]["aes"]
-                sig = data["peers"][master_id]["sig"]
+                # The sender includes an aes entry per peer only for peers whose
+                # public key it already has; for the others it sends an empty
+                # dict (see ``send_aes_key_event``). During bring-up our key may
+                # not have reached this peer yet -- skip and wait for the
+                # re-announce rather than KeyError-ing the whole handler. Look
+                # our entry up by the bare ``master_id`` (#68462), as sibling
+                # masters key ``data["peers"]`` by their ``cluster_peers`` names.
+                our_entry = data["peers"].get(master_id) or {}
+                if "aes" not in our_entry:
+                    log.debug(
+                        "Peer %s has no aes key for us yet (our public key not "
+                        "propagated to it); awaiting re-announce.",
+                        peer,
+                    )
+                    return
+                aes = our_entry["aes"]
+                sig = our_entry["sig"]
                 key_str = self.master_key.master_key.decrypt(
                     aes, algorithm=self.opts["cluster_encryption_algorithm"]
                 )
@@ -3887,13 +3939,21 @@ class MasterPubServerChannel:
         for task in tasks:
             try:
                 task.result()
-            # XXX This error is transport specific and should be something else
-            except tornado.iostream.StreamClosedError:
+            # A closed stream, a refused/timed-out connect to a peer that isn't
+            # listening yet (normal during bring-up), or any other socket error
+            # all mean the same thing here: the push didn't land, reset and
+            # retry. asyncio.TimeoutError/ConnectionError are subclasses of
+            # OSError, but list them for clarity.
+            except (
+                tornado.iostream.StreamClosedError,
+                asyncio.TimeoutError,
+                OSError,
+            ):
                 if task.get_name() == self.opts["id"]:
                     log.error("Unable to forward event to local ipc bus")
                 else:
                     peer = task.get_name()
-                    log.warning(
+                    log.debug(
                         "Unable to forward event to cluster peer %s; "
                         "resetting pusher for reconnect",
                         peer,

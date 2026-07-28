@@ -103,6 +103,10 @@ def test_reauth(salt_cli, salt_minion, salt_master, timeout, event_listener):
     log.debug("Ping successful, stopping minion thread")
     stop_event.set()
     minion_proc.join()
+    # minion_func's finally terminated this shared package-scoped minion. Leave
+    # it running so later tests in this package (e.g. test_presence_events) find
+    # it alive instead of pinging a dead minion.
+    salt_minion.start()
 
 
 def test_presence_events(salt_cli, salt_minion, salt_master, event_listener):

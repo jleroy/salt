@@ -27,15 +27,15 @@ log = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def req_server_opts(tmp_path):
+def req_server_opts(tmp_path, socket_tmp_path):
     """
     Minimal master opts dict sufficient to build a
     :class:`ReqServerChannel` without a running master.
     """
-    sock_dir = tmp_path / "sock"
+    sock_dir = socket_tmp_path
+
     pki_dir = tmp_path / "pki"
     cache_dir = tmp_path / "cache"
-    sock_dir.mkdir()
     pki_dir.mkdir()
     cache_dir.mkdir()
     return {

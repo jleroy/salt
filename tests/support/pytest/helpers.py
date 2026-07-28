@@ -287,7 +287,12 @@ class TestAccount:
 
     @password.default
     def _default_password(self):
-        return random_string("pwd-", size=8)
+        # The "Pwd1-" prefix guarantees upper/lower/digit/special characters so
+        # the password always meets the Windows password-complexity policy
+        # (Server 2025 enforces it by default). The random suffix is drawn from
+        # [A-Za-z0-9] only and may otherwise be a single character category,
+        # which intermittently trips the policy (e.g. an all-lowercase suffix).
+        return random_string("Pwd1-", size=8)
 
     @hashed_password.default
     def _default_hashed_password(self):

@@ -51,16 +51,19 @@ class TimeoutHandle:
 class TimeoutScheduler:
     def __init__(self):
         self.timeouts = {}
+        self._seq = 0
 
     def schedule(self, timeout, callback):
         t = time.monotonic() + timeout
-        self.timeouts[t] = callback
-        return TimeoutHandle(self, t, callback)
+        key = (t, self._seq)
+        self._seq += 1
+        self.timeouts[key] = callback
+        return TimeoutHandle(self, key, callback)
 
     def process_timeouts(self):
-        for t in list(self.timeouts.keys()):
-            if time.monotonic() > t:
-                cb = self.timeouts.pop(t)
+        for key in list(self.timeouts.keys()):
+            if time.monotonic() > key[0]:
+                cb = self.timeouts.pop(key)
                 cb()
 
 
@@ -72,24 +75,26 @@ class ManualTimeoutScheduler(TimeoutScheduler):
 
     def schedule(self, timeout, callback):
         t = self.time + timeout
-        self.timeouts[t] = callback
-        return TimeoutHandle(self, t, callback)
+        key = (t, self._seq)
+        self._seq += 1
+        self.timeouts[key] = callback
+        return TimeoutHandle(self, key, callback)
 
     def advance_clock_to_next_timeout(self):
         if not self.timeouts:
             return
-        self.time = sorted(self.timeouts.keys())[0]
+        self.time = sorted(self.timeouts.keys())[0][0]
         return True
 
     def process_timeouts(self):
-        for t in sorted(list(self.timeouts.keys())):
-            if self.time >= t:
-                cb = self.timeouts.pop(t)
+        for key in sorted(list(self.timeouts.keys())):
+            if self.time >= key[0]:
+                cb = self.timeouts.pop(key)
                 cb()
 
     def process_existing_timeouts(self):
-        for t in sorted(list(self.timeouts.keys())):
-            cb = self.timeouts.pop(t)
+        for key in sorted(list(self.timeouts.keys())):
+            cb = self.timeouts.pop(key)
             cb()
 
 
@@ -129,6 +134,7 @@ class AsyncTimeoutScheduler:
 class ThreadedTimeoutScheduler:
     def __init__(self):
         self.timeouts = {}
+        self._seq = 0
         self._lock = threading.Lock()
         self._running = threading.Event()
         self._thread = None
@@ -146,17 +152,19 @@ class ThreadedTimeoutScheduler:
     def schedule(self, timeout, callback):
         with self._lock:
             t = time.monotonic() + timeout
-            self.timeouts[t] = callback
-            return TimeoutHandle(self, t, callback)
+            key = (t, self._seq)
+            self._seq += 1
+            self.timeouts[key] = callback
+            return TimeoutHandle(self, key, callback)
 
     def _run(self):
         while self._running.is_set():
             now = time.monotonic()
             to_call = []
             with self._lock:
-                for t in list(self.timeouts.keys()):
-                    if now >= t:
-                        to_call.append(self.timeouts.pop(t))
+                for key in list(self.timeouts.keys()):
+                    if now >= key[0]:
+                        to_call.append(self.timeouts.pop(key))
             for cb in to_call:
                 try:
                     cb()

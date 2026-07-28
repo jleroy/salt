@@ -2081,9 +2081,11 @@ def runner(
         master_config = os.path.join(os.path.dirname(__opts__["conf_file"]), "master")
         master_opts = salt.config.master_config(master_config)
         rclient = salt.runner.RunnerClient(master_opts)
+        is_minion = True
     else:
         master_opts = __opts__
         rclient = salt.runner.RunnerClient(__opts__)
+        is_minion = False
 
     if name in rclient.functions:
         aspec = salt.utils.args.get_function_argspec(rclient.functions[name])
@@ -2108,7 +2110,7 @@ def runner(
         "print_event": False,
         "full_return": full_return,
     }
-    runas = _master_user_runas(master_opts)
+    runas = _master_user_runas(master_opts) if is_minion else None
     if runas:
         return _client_cmd_as(runas, rclient, name, cmd_kwargs)
     return rclient.cmd(name, **cmd_kwargs)
@@ -2156,9 +2158,11 @@ def wheel(name, *args, **kwargs):
         master_config = os.path.join(os.path.dirname(__opts__["conf_file"]), "master")
         master_opts = salt.config.client_config(master_config)
         wheel_client = salt.wheel.WheelClient(master_opts)
+        is_minion = True
     else:
         master_opts = __opts__
         wheel_client = salt.wheel.WheelClient(__opts__)
+        is_minion = False
 
     # The WheelClient cmd needs args, kwargs, and pub_data separated out from
     # the "normal" kwargs structure, which at this point contains __pub_x keys.
@@ -2191,7 +2195,7 @@ def wheel(name, *args, **kwargs):
             "print_event": False,
             "full_return": True,
         }
-        runas = _master_user_runas(master_opts)
+        runas = _master_user_runas(master_opts) if is_minion else None
         if runas:
             ret = _client_cmd_as(runas, wheel_client, name, cmd_kwargs)
         else:

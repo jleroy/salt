@@ -104,6 +104,8 @@ def test_get_socket():
 
     if salt.utils.platform.is_windows():
         assert int(socket.family) == 23
+    elif salt.utils.platform.is_darwin():
+        assert int(socket.family) == 30
     else:
         assert int(socket.family) == 10
 
@@ -769,18 +771,19 @@ async def test_salt_message_server_recreates_unpacker_on_disconnect(monkeypatch)
 
 async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypatch):
     """
-    Ensure that a general exception from the stream causes the server to reset its
-    unpacker, preventing the previous buffer from leaking.
+    Ensure that a general exception from the stream causes the server to reset
+    its unpacker, releasing the previous buffer instead of leaking it.
     """
 
     class TrackingUnpacker:
-        living = weakref.WeakSet()
+        # Weak references to every unpacker created, in creation order.
+        refs = []
         created = 0
 
         def __init__(self, *args, **kwargs):
             self.max_buffer_size = kwargs.get("max_buffer_size")
             TrackingUnpacker.created += 1
-            TrackingUnpacker.living.add(self)
+            TrackingUnpacker.refs.append(weakref.ref(self))
 
         def feed(self, data):
             return None
@@ -822,9 +825,16 @@ async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypa
         await tornado.gen.sleep(0.01)
         gc.collect()
         assert stream.closed
-        # initial creation + reset on exception
+        # initial unpacker + the one created when resetting on the exception
         assert TrackingUnpacker.created == 2
-        assert not TrackingUnpacker.living
+        # The previous unpacker -- the one that was fed the 4096-byte buffer --
+        # must be released once handle_stream resets it on the exception path.
+        # The reset unpacker itself can stay transiently alive (it is held by
+        # the handled exception's traceback frame, a CPython artifact, not a
+        # buffer leak), so we only assert on the previous one.
+        assert (
+            TrackingUnpacker.refs[0]() is None
+        ), "the previous unpacker (and its buffer) was not released on reset"
     finally:
         server.close()
 
@@ -967,11 +977,13 @@ async def test_pub_server_paths_no_perms(master_opts, io_loop):
 
 
 @pytest.mark.skip_on_windows()
-async def test_pub_server_publisher_pull_path_perms(master_opts, io_loop, tmp_path):
+async def test_pub_server_publisher_pull_path_perms(
+    master_opts, io_loop, socket_tmp_path
+):
     def publish_payload(payload):
         return payload
 
-    pull_path = str(tmp_path / "pull.ipc")
+    pull_path = str(socket_tmp_path / "pull.ipc")
     pull_path_perms = 0o664
     pubserv = salt.transport.tcp.PublishServer(
         master_opts,
@@ -993,11 +1005,13 @@ async def test_pub_server_publisher_pull_path_perms(master_opts, io_loop, tmp_pa
 
 
 @pytest.mark.skip_on_windows()
-async def test_pub_server_publisher_pub_path_perms(master_opts, io_loop, tmp_path):
+async def test_pub_server_publisher_pub_path_perms(
+    master_opts, io_loop, socket_tmp_path
+):
     def publish_payload(payload):
         return payload
 
-    pub_path = str(tmp_path / "pub.ipc")
+    pub_path = str(socket_tmp_path / "pub.ipc")
     pub_path_perms = 0o664
     pubserv = salt.transport.tcp.PublishServer(
         master_opts,

@@ -189,7 +189,14 @@ class LoadBalancerServer(salt.utils.process.SignalHandlingProcess):
 
     def close(self):
         if self._socket is not None:
-            self._socket.shutdown(socket.SHUT_RDWR)
+            try:
+                self._socket.shutdown(socket.SHUT_RDWR)
+            except OSError as exc:
+                # The socket is a listening socket with no connected peer, so
+                # shutdown() raises ENOTCONN on some platforms (e.g. macOS/BSD).
+                # There is nothing to shut down in that case, just close it.
+                if exc.errno != errno.ENOTCONN:
+                    raise
             self._socket.close()
             self._socket = None
 
@@ -1940,7 +1947,16 @@ class _TCPPubServerPublisher:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.stream = tornado.iostream.IOStream(sock)
             try:
-                await self.stream.connect(sock_addr)
+                # ``timeout`` here bounds the whole retry loop; without also
+                # bounding the individual connect, a connect to an unreachable
+                # host blocks for the full OS timeout (SYN retries, ~tens of
+                # seconds) before the loop can re-check. Cap the per-attempt
+                # connect so callers that pass a timeout (e.g. cluster peer
+                # pushers) actually fail fast.
+                if timeout is not None:
+                    await asyncio.wait_for(self.stream.connect(sock_addr), timeout)
+                else:
+                    await self.stream.connect(sock_addr)
                 self._connecting_future.set_result(True)
                 break
             except Exception as e:  # pylint: disable=broad-except
@@ -2013,6 +2029,75 @@ class _TCPPubServerPublisher:
             await self.connect()
         pack = salt.transport.frame.frame_msg_ipc(msg, raw_body=True)
         await self.stream.write(pack)
+
+
+class ClusterPeerPusher:
+    """
+    Fully-async client that pushes events to a single cluster peer's pull
+    socket, used by ``salt.channel.server.MasterPubServerChannel`` to fan
+    events out to peer masters.
+
+    Unlike ``PublishServer.publish`` (which wraps connect/send in a
+    ``SyncWrapper`` driving a nested, *blocking* ``run_until_complete``), this
+    awaits connect/send directly, so a push to an unreachable peer never blocks
+    the caller's io_loop. That matters during cluster bring-up: the founding
+    master comes up before its peers exist, and a blocking connect to a
+    not-yet-listening peer would stall the event loop and starve delivery of
+    the master's own local events (e.g. ``salt/master/<id>/start``), preventing
+    it from ever signalling that it started.
+    """
+
+    def __init__(self, pull_host, pull_port, connect_timeout=None):
+        self.pull_host = pull_host
+        self.pull_port = pull_port
+        self.connect_timeout = connect_timeout
+        self.pub_sock = None
+        # A single in-flight (re)connect, shared by all concurrent publishes.
+        self._connecting = None
+
+    async def _ensure_connected(self):
+        if self.pub_sock is not None and self.pub_sock.connected():
+            return
+        # ``self.pushers`` are reused and shared across concurrent
+        # ``publish_payload`` calls. If each publish reconnected on its own, two
+        # of them would race to replace ``self.pub_sock`` -- one tearing down
+        # the socket another is mid-send on -- dropping peer events.
+        #
+        # The first publish to find the socket down starts one reconnect; the
+        # rest await that same attempt. Concurrent pushes to a still-down peer
+        # share a single timeout (not N), and only one writer ever touches
+        # ``self.pub_sock``.
+        if self._connecting is None:
+            self._connecting = asyncio.ensure_future(self._reconnect())
+        connecting = self._connecting
+        try:
+            await connecting
+        finally:
+            if self._connecting is connecting:
+                self._connecting = None
+
+    async def _reconnect(self):
+        if self.pub_sock is not None:
+            self.pub_sock.close()
+            self.pub_sock = None
+        sock = _TCPPubServerPublisher(self.pull_host, self.pull_port, None)
+        await sock.connect(timeout=self.connect_timeout)
+        self.pub_sock = sock
+
+    async def publish(self, payload, **kwargs):
+        await self._ensure_connected()
+        if self.pub_sock is None or not self.pub_sock.connected():
+            # The connection dropped between connect and send; surface it so the
+            # publish_payload handler resets us for a fresh (timeout-bounded)
+            # reconnect, rather than letting send() fall into its own unbounded,
+            # timeout-less reconnect.
+            raise tornado.iostream.StreamClosedError()
+        await self.pub_sock.send(payload)
+
+    def close(self):
+        if self.pub_sock is not None:
+            self.pub_sock.close()
+            self.pub_sock = None
 
 
 class RequestClient(salt.transport.base.RequestClient):
