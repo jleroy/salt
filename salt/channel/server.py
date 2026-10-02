@@ -67,22 +67,22 @@ def _cluster_is_ready(opts):
     """
     Return ``True`` if this master may serve minion/CLI requests.
 
-    For non-cluster masters this is always ``True``.  For cluster members it
+    For non-cluster masters this is always ``True``. For cluster members it
     returns ``True`` once the Raft ``MembershipStateMachine`` has committed a
     CONFIG entry listing this node as a voter, observed either through the
     in-memory ``SMaster.secrets["cluster_ready"]["event"]`` or, as a fallback
-    for workers that hold a different copy of that event, the on-disk
-    readiness sentinel written by ``mark_cluster_ready``.
+    for workers that hold a different copy of that event, the on-disk readiness
+    sentinel written by ``mark_cluster_ready``.
     """
     if not opts.get("cluster_id"):
         return True
     entry = salt.master.SMaster.secrets.get("cluster_ready")
     if entry is not None and entry["event"].is_set():
         return True
-    # The in-memory event is per-process and can be missed by a request
-    # worker spawned into a different generation than the process that set
-    # it. The readiness sentinel lives on the shared cachedir, so any worker
-    # observes it once this node has committed as a voter.
+    # The in-memory event is per-process and can be missed by a request worker
+    # spawned into a different generation than the process that set it. The
+    # readiness sentinel lives on the shared cachedir, so any worker observes
+    # it once this node has committed as a voter.
     base = salt.cluster.healthchecks.health_dir(opts)
     if base is not None:
         return (base / salt.cluster.healthchecks.READY_SENTINEL).exists()
@@ -2828,8 +2828,7 @@ class MasterPubServerChannel:
         # Mirror __init__ for the attributes that are not carried in the
         # pickled state: on spawning platforms this object is reconstructed
         # via __setstate__ (not __init__), so anything __init__ sets must be
-        # re-established here or it goes missing (e.g. ``cluster_peers`` used
-        # by ``send_aes_key_event`` and ``master_key`` used to sign events).
+        # re-established here or it goes missing.
         self.opts = state["opts"]
         self.transport = state["transport"]
         self.io_loop = tornado.ioloop.IOLoop.current()

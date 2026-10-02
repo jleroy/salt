@@ -3120,8 +3120,7 @@ def script(
     # default temp directory: ``$TMPDIR`` is a per-user, mode-0700 directory, so
     # even after chowning the file the target user cannot traverse the parent
     # directory. Fall back to a world-traversable location, unless an explicit
-    # ``cwd`` was provided. Only the script file location changes here; the
-    # ``cwd`` passed to ``_run`` below is left untouched.
+    # ``cwd`` was provided.
     script_dir = cwd
     if script_dir is None and runas is not None and salt.utils.platform.is_darwin():
         script_dir = "/tmp"

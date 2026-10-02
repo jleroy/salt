@@ -1947,7 +1947,7 @@ class _TCPPubServerPublisher:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.stream = tornado.iostream.IOStream(sock)
             try:
-                # ``timeout`` here bounds the whole retry loop; without also
+                # "timeout" here bounds the whole retry loop; without also
                 # bounding the individual connect, a connect to an unreachable
                 # host blocks for the full OS timeout (SYN retries, ~tens of
                 # seconds) before the loop can re-check. Cap the per-attempt
