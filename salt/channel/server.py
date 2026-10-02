@@ -3760,21 +3760,20 @@ class MasterPubServerChannel:
                     return
                 # The sender includes an aes entry per peer only for peers whose
                 # public key it already has; for the others it sends an empty
-                # dict (see ``send_aes_key_event``). During bring-up our key may
-                # not have reached this peer yet -- skip and wait for the
-                # re-announce rather than KeyError-ing the whole handler. Look
-                # our entry up by the bare ``master_id`` (#68462), as sibling
-                # masters key ``data["peers"]`` by their ``cluster_peers`` names.
-                our_entry = data["peers"].get(master_id) or {}
-                if "aes" not in our_entry:
+                # dict (see ``send_aes_key_event``).
+                # During bring-up our key may not have reached this peer yet:
+                # skip and wait for the re-announce rather than raising
+                # KeyError.
+                peer_data = data["peers"].get(master_id) or {}
+                if "aes" not in peer_data:
                     log.debug(
-                        "Peer %s has no aes key for us yet (our public key not "
-                        "propagated to it); awaiting re-announce.",
+                        "Peer %s has no AES key for us yet (our public key not "
+                        "propagated to it). Awaiting re-announce.",
                         peer,
                     )
                     return
-                aes = our_entry["aes"]
-                sig = our_entry["sig"]
+                aes = peer_data["aes"]
+                sig = peer_data["sig"]
                 key_str = self.master_key.master_key.decrypt(
                     aes, algorithm=self.opts["cluster_encryption_algorithm"]
                 )
