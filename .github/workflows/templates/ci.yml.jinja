@@ -1,7 +1,5 @@
 <%- set gh_environment = gh_environment|default("ci") %>
 
-<%- set prepare_workflow_salt_version_input = "3008.1" %>
-
 <%- extends 'layout.yml.jinja' %>
 <%- set pre_commit_version = "4.3.0" %>
 {# Repo-level opt-out. Set `SKIP_CI=true` on repos where ci.yml would
