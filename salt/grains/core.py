@@ -297,7 +297,18 @@ def _linux_gpu_data():
 
     devs = []
     try:
-        lspci_out = __salt__["cmd.run"](f"{lspci} -vmm")
+        # Run lspci directly (not via cmd.run) with a short timeout so a
+        # hung lspci -- e.g. inside a container without a live PCI bus --
+        # cannot leak orphan child processes on every grains refresh.
+        # On timeout subprocess.run kills the child before re-raising.
+        proc = subprocess.run(
+            [lspci, "-vmm"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        lspci_out = proc.stdout
 
         cur_dev = {}
         error = False
@@ -325,6 +336,13 @@ def _linux_gpu_data():
                 "check that you have a valid shell configured and "
                 "permissions to run lspci command"
             )
+    except subprocess.TimeoutExpired:
+        log.warning(
+            "The `lspci` command timed out while collecting GPU grains. "
+            "GPU grains will not be available. Set `enable_gpu_grains: "
+            "False` in the minion config to skip this collection entirely."
+        )
+        return {}
     except OSError:
         pass
 
@@ -462,7 +480,9 @@ def _bsd_cpudata(osdata):
     if osdata["kernel"] == "FreeBSD" and os.path.isfile("/var/run/dmesg.boot"):
         grains["cpu_flags"] = []
         # TODO: at least it needs to be tested for BSD other then FreeBSD
-        with salt.utils.files.fopen("/var/run/dmesg.boot", "r") as _fp:
+        with salt.utils.files.fopen(
+            "/var/run/dmesg.boot", "r", encoding="utf8", errors="ignore"
+        ) as _fp:
             cpu_here = False
             for line in _fp:
                 if line.startswith("CPU: "):
@@ -1904,6 +1924,10 @@ _OS_FAMILY_MAP = {
     "openSUSE Leap": "Suse",
     "openSUSE Tumbleweed": "Suse",
     "SLES_SAP": "Suse",
+    "alfaLinux": "Suse",
+    "alfaLinux Rise": "Suse",
+    "AlterOS": "RedHat",
+    "RED OS": "RedHat",
     "Arch ARM": "Arch",
     "Manjaro": "Arch",
     "Manjaro ARM": "Arch",
@@ -2238,8 +2262,33 @@ def _os_release_to_grains(os_release):
         or _os_release_quirks_for_osrelease(os_release),
     }
 
+    cpe = os_release.get("CPE_NAME") or _derive_cpe_grain(
+        grains.get("os"), grains.get("osrelease")
+    )
+    if cpe:
+        grains["cpe"] = cpe
+
     # oscodename and osrelease could be empty or None. Remove those.
     return {key: value for key, value in grains.items() if key}
+
+
+def _derive_cpe_grain(os, osrelease):
+    """
+    Derive the 'cpe' grain from the 'os' and 'osrelease' grains.
+
+    Normally, the 'cpe' grain can be extracted from the os_release file, but not all
+    distributions include it. In that case, we attempt to derive the CPE based on other
+    grains. Returns ``None`` if a CPE cannot be derived.
+
+    .. versionadded:: 3009.0
+    """
+    if not osrelease:
+        return None
+    if os == "Debian":
+        return "cpe:/o:debian:debian_linux:" + osrelease
+    elif os == "Ubuntu":
+        return "cpe:/o:canonical:ubuntu_linux:" + osrelease
+    return None
 
 
 def _linux_distribution_data():

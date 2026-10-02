@@ -64,6 +64,13 @@ Requires: /usr/sbin/usermod
 Requires: /usr/sbin/groupadd
 Requires: /usr/sbin/useradd
 
+Requires(pre):       coreutils
+Requires(pre):       grep
+Requires(pre):       /usr/bin/getent
+Requires(post):      coreutils
+Requires(preun):     findutils
+Requires(posttrans): findutils
+
 BuildRequires: python3
 BuildRequires: python3-pip
 BuildRequires: openssl
@@ -108,6 +115,23 @@ Requires:   %{name} = %{version}-%{release}
 Provides:   salt-minion = %{version}
 Obsoletes:  salt3-minion < 3006
 Obsoletes:  salt3006-minion
+
+Requires(pre):       coreutils
+Requires(pre):       grep
+Requires(pre):       systemd
+Requires(post):      coreutils
+Requires(post):      findutils
+Requires(post):      grep
+Requires(post):      openssl
+Requires(post):      sed
+Requires(post):      systemd
+Requires(preun):     systemd
+Requires(postun):    coreutils
+Requires(postun):    grep
+Requires(postun):    sed
+Requires(postun):    systemd
+Requires(posttrans): coreutils
+Requires(posttrans): systemd
 
 %description minion
 The Salt minion is the agent component of Salt. It listens for instructions
@@ -242,6 +266,11 @@ install -d -m 0755 %{buildroot}%{_var}/log/salt
 install -d -m 0755 %{buildroot}%{_var}/run/salt
 install -d -m 0755 %{buildroot}%{_var}/run/salt/master
 install -d -m 0755 %{buildroot}%{_var}/cache/salt
+# %files declares %dir %{_var}/lib/salt as the anchor for hardened-mode
+# per-daemon state trees created lazily by scriptlets when
+# SALT_ONEDIR_HARDEN=1. The parent must exist at %files-check time even
+# when no scriptlets run (rpmbuild verifies the buildroot).
+install -d -m 0755 %{buildroot}%{_var}/lib/salt
 install -Dd -m 0750 %{buildroot}%{_var}/cache/salt/master
 install -Dd -m 0750 %{buildroot}%{_var}/cache/salt/minion
 install -Dd -m 0750 %{buildroot}%{_var}/cache/salt/master/jobs
@@ -343,6 +372,7 @@ rm -rf %{buildroot}
 %dir %{_var}/cache/salt
 %dir %{_var}/run/salt
 %dir %{_var}/log/salt
+%dir %{_var}/lib/salt
 %doc %{_mandir}/man1/spm.1*
 %{_bindir}/spm
 %{_bindir}/salt-pip
@@ -432,16 +462,34 @@ rm -rf %{buildroot}
 
 %pre
 # Source setup configuration if present so SALT_USER/SALT_GROUP/
-# SALT_HOME/SALT_NAME from /etc/sysconfig/salt-minion-setup override
-# the rpm-built-in defaults. The shell variables (when set) win over
-# the macro-expanded defaults below.
+# SALT_HOME/SALT_NAME/SALT_ONEDIR_HARDEN from
+# /etc/sysconfig/salt-minion-setup override the rpm-built-in defaults.
+# The shell variables (when set) win over the macro-expanded defaults
+# below.
 if [ -f /etc/sysconfig/salt-minion-setup ]; then
     . /etc/sysconfig/salt-minion-setup
 fi
 [ -n "$SALT_USER" ] || SALT_USER=%{_SALT_USER}
 [ -n "$SALT_GROUP" ] || SALT_GROUP=%{_SALT_GROUP}
-[ -n "$SALT_HOME" ] || SALT_HOME=%{_SALT_HOME}
 [ -n "$SALT_NAME" ] || SALT_NAME=%{_SALT_NAME}
+
+# SALT_ONEDIR_HARDEN=1 opts in to relocating the salt user's writable
+# state out of /opt/saltstack/salt into per-daemon
+# /var/lib/salt/<daemon>/. On 3006.x the default is unset (legacy
+# blanket-chown of /opt/saltstack/salt preserved). The default flips to
+# hardened on 3009.0. See issue #70198.
+
+# SALT_HOME default depends on SALT_ONEDIR_HARDEN. In hardened mode the
+# salt user's account home moves under /var/lib/salt so
+# /opt/saltstack/salt can stay root-owned and 0755. Per-daemon
+# scriptlets may reassign SALT_HOME to /var/lib/salt/<daemon>/home.
+if [ -z "$SALT_HOME" ]; then
+    if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+        SALT_HOME=/var/lib/salt/home
+    else
+        SALT_HOME=%{_SALT_HOME}
+    fi
+fi
 
 # create user to avoid running server as root
 # 1. create group if not existing
@@ -511,6 +559,37 @@ if [ -f /etc/sysconfig/salt-minion-setup ]; then
     . /etc/sysconfig/salt-minion-setup
 fi
 
+# Detect whether the current RPM transaction was initiated from within
+# the ``salt-minion.service`` control group -- i.e. a running minion is
+# driving its own upgrade via ``pkg.installed`` / ``pkg.install``. In
+# that case a blocking ``systemctl stop salt-minion.service`` below
+# deadlocks: the stop waits for every process in the (KillMode=mixed)
+# cgroup to exit, including the salt worker running this transaction;
+# the worker is blocked in dnf; dnf is blocked in ``%pre``; ``%pre`` is
+# blocked in ``systemctl stop``. After ``TimeoutStopSec`` elapses,
+# systemd SIGKILLs the whole cgroup -- including the salt job -- and
+# the state run's return is lost. See issue #69656.
+#
+# Walk the PPID chain from the scriptlet's parent (dnf) up to init and
+# check each ancestor's cgroup: ``yumpkg`` wraps dnf in
+# ``systemd-run --scope`` which detaches dnf's own cgroup from
+# ``salt-minion.service``, but the process-tree relationship is
+# preserved and eventually reaches the salt worker, which is still
+# under ``salt-minion.service``.
+_salt_minion_upgrade_from_running_minion() {
+    _pid=$PPID
+    _count=0
+    while [ -n "$_pid" ] && [ "$_pid" != "1" ] && [ "$_pid" != "0" ] && [ "$_count" -lt 40 ]; do
+        if [ -r "/proc/$_pid/cgroup" ] \
+           && grep -q 'salt-minion\.service' "/proc/$_pid/cgroup" 2>/dev/null; then
+            return 0
+        fi
+        _pid=$(grep '^PPid:' "/proc/$_pid/status" 2>/dev/null | head -1 | cut -d ':' -f 2 | tr -d '[:space:]')
+        _count=$((_count + 1))
+    done
+    return 1
+}
+
 if [ $1 -gt 1 ] ; then
     # Upgrade: detect and save current ownership.
     #
@@ -522,7 +601,19 @@ if [ $1 -gt 1 ] ; then
     if /bin/systemctl is-active --quiet salt-minion.service 2>/dev/null; then
         touch /tmp/.salt-minion-upgrade-was-active
     fi
-    /bin/systemctl stop salt-minion.service >/dev/null 2>&1 || :
+    if _salt_minion_upgrade_from_running_minion; then
+        # Minion is upgrading itself. Skip the blocking stop -- it would
+        # deadlock the transaction and cause systemd to SIGKILL the job.
+        # ``%post`` and ``%posttrans minion`` will honor the marker
+        # dropped here and leave the running minion alone so its state
+        # run returns cleanly; the FAQ ``cmd.run bg: True`` pattern then
+        # restarts the minion after the state completes. See #69656.
+        touch /tmp/.salt-minion-self-upgrade
+        touch /tmp/.salt-minion-upgrade-was-active
+        echo "salt-minion: skipping in-scriptlet stop; upgrade is driven by the running minion (issue #69656)" >&2
+    else
+        /bin/systemctl stop salt-minion.service >/dev/null 2>&1 || :
+    fi
 
     # Check if minion config specifies a non-root user. The configured
     # user in /etc/salt/minion (or a drop-in under /etc/salt/minion.d)
@@ -685,6 +776,13 @@ fi
 # %%systemd_post salt-minion.service
 if [ $1 -gt 1 ] ; then
   # Upgrade
+  # SALT_ONEDIR_HARDEN default is unset on 3006.x (legacy layout
+  # preserved); operators may opt in with SALT_ONEDIR_HARDEN=1. The
+  # default flips on 3009.0. See issue #70198.
+  if [ "$SALT_ONEDIR_HARDEN" = "1" ] && [ -z "$SALT_EXTRAS_DIR" ]; then
+      PY_VER=$(/opt/saltstack/salt/bin/python3 -c "import sys; sys.stdout.write('{}.{}'.format(*sys.version_info)); sys.stdout.flush()" 2>/dev/null || echo "")
+      [ -n "$PY_VER" ] && SALT_EXTRAS_DIR=/var/lib/salt/minion/extras-${PY_VER}
+  fi
   # Restore ownership before restarting service
   if [ -f "/tmp/.salt-minion-upgrade-ownership" ]; then
     OWNERSHIP=$(cat /tmp/.salt-minion-upgrade-ownership)
@@ -706,23 +804,48 @@ if [ $1 -gt 1 ] ; then
     chown $OWNERSHIP /var/cache/salt/minion/proc
     chmod 750 /var/cache/salt/minion/proc
 
-    # Restore ownership of the main installation directory for salt-pip access
-    chown -R $OWNERSHIP /opt/saltstack/salt
-    # Also restore ownership of extras directory if it exists. Honor an
-    # explicit SALT_EXTRAS_DIR override (from /etc/sysconfig/salt-minion-setup)
-    # so packagers can relocate the extras dir; otherwise discover any
-    # extras-* directories under the install root.
-    if [ -n "$SALT_EXTRAS_DIR" ] && [ -d "$SALT_EXTRAS_DIR" ]; then
-        chown -R $OWNERSHIP "$SALT_EXTRAS_DIR"
+    if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+        # Hardened layout: keep /opt/saltstack/salt root-owned; chown
+        # only the per-daemon writable dirs. See issue #70198.
+        install -d -m 0755 -o "$USER_GROUP" -g "${OWNERSHIP#*:}" /var/lib/salt/minion
+        install -d -m 0755 -o "$USER_GROUP" -g "${OWNERSHIP#*:}" /var/lib/salt/minion/home
+        [ -n "$SALT_EXTRAS_DIR" ] && install -d -m 0755 -o "$USER_GROUP" -g "${OWNERSHIP#*:}" "$SALT_EXTRAS_DIR"
+        # Upgrade migration: move populated legacy extras into new
+        # per-daemon location. Idempotent no-op if already migrated.
+        if [ -n "$PY_VER" ] \
+           && [ -d "/opt/saltstack/salt/extras-${PY_VER}" ] \
+           && [ -n "$(ls -A /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null)" ] \
+           && [ -d "$SALT_EXTRAS_DIR" ] \
+           && [ -z "$(ls -A ${SALT_EXTRAS_DIR} 2>/dev/null)" ]; then
+            mv /opt/saltstack/salt/extras-${PY_VER}/* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+            mv /opt/saltstack/salt/extras-${PY_VER}/.[!.]* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+            rmdir /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null || true
+            chown -R $OWNERSHIP "$SALT_EXTRAS_DIR" || true
+        fi
     else
-        # Use find to handle wildcard expansion safely in scriptlet
-        find /opt/saltstack/salt -maxdepth 1 -name "extras-*" -exec chown -R $OWNERSHIP {} +
+        # Restore ownership of the main installation directory for
+        # salt-pip access (legacy)
+        chown -R $OWNERSHIP /opt/saltstack/salt
+        # Also restore ownership of extras directory if it exists.
+        if [ -n "$SALT_EXTRAS_DIR" ] && [ -d "$SALT_EXTRAS_DIR" ]; then
+            chown -R $OWNERSHIP "$SALT_EXTRAS_DIR"
+        else
+            # Use find to handle wildcard expansion safely in scriptlet
+            find /opt/saltstack/salt -maxdepth 1 -name "extras-*" -exec chown -R $OWNERSHIP {} +
+        fi
     fi
 
     # Create marker file to tell %posttrans this was an upgrade
     touch /tmp/.salt-minion-upgrade-ownership.done
   fi
-  /bin/systemctl try-restart salt-minion.service >/dev/null 2>&1 || :
+  # ``try-restart`` would interrupt a self-upgrade driven by the
+  # running minion -- the state run would die mid-transaction. Skip
+  # it when ``%pre minion`` detected that case; ``%posttrans minion``
+  # (and the FAQ ``cmd.run bg: True`` pattern) restart the service
+  # after the transaction completes. See issue #69656.
+  if [ ! -f /tmp/.salt-minion-self-upgrade ]; then
+    /bin/systemctl try-restart salt-minion.service >/dev/null 2>&1 || :
+  fi
 else
   # Initial installation
   /bin/systemctl preset salt-minion.service >/dev/null 2>&1 || :
@@ -759,6 +882,12 @@ fi
 [ -n "$SALT_USER" ] || SALT_USER=%{_SALT_USER}
 [ -n "$SALT_GROUP" ] || SALT_GROUP=%{_SALT_GROUP}
 PY_VER=$(/opt/saltstack/salt/bin/python3 -c "import sys; sys.stdout.write('{}.{}'.format(*sys.version_info)); sys.stdout.flush();")
+if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+    [ -n "$SALT_HOME" ] || SALT_HOME=/var/lib/salt/cloud/home
+    if [ -z "$SALT_EXTRAS_DIR" ] && [ -n "$PY_VER" ]; then
+        SALT_EXTRAS_DIR=/var/lib/salt/cloud/extras-${PY_VER}
+    fi
+fi
 if [ ! -e "/var/log/salt/cloud" ]; then
   touch /var/log/salt/cloud
   chmod 640 /var/log/salt/cloud
@@ -767,68 +896,251 @@ if [ $1 -gt 1 ] ; then
     # Upgrade: preserve existing ownership, don't reset to defaults
     :
 else
-        chown -R $SALT_USER:$SALT_GROUP /etc/salt/cloud.deploy.d /var/log/salt/cloud /opt/saltstack/salt/lib/python${PY_VER}/site-packages/salt/cloud/deploy /opt/saltstack/salt
+        if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+            install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" /var/lib/salt/cloud
+            [ -n "$SALT_HOME" ] && install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_HOME"
+            [ -n "$SALT_EXTRAS_DIR" ] && install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_EXTRAS_DIR"
+            chown -R $SALT_USER:$SALT_GROUP /etc/salt/cloud.deploy.d /var/log/salt/cloud /opt/saltstack/salt/lib/python${PY_VER}/site-packages/salt/cloud/deploy
+        else
+            chown -R $SALT_USER:$SALT_GROUP /etc/salt/cloud.deploy.d /var/log/salt/cloud /opt/saltstack/salt/lib/python${PY_VER}/site-packages/salt/cloud/deploy /opt/saltstack/salt
+            if [ -n "$SALT_EXTRAS_DIR" ] && [ -d "$SALT_EXTRAS_DIR" ]; then
+                chown -R $SALT_USER:$SALT_GROUP "$SALT_EXTRAS_DIR" || true
+            fi
+        fi
     fi
+# Post-upgrade healer: on Photon's tdnf, RPM upgrade resets the
+# /opt/saltstack/salt directory ownership to root even though the
+# tree existed with salt ownership before the transaction. The
+# ``$1 > 1`` gate above then skips the legacy chown, leaving the
+# tree root-owned. Detect the reset (only tree.owner=='root' is
+# treated as accidental; any other non-salt owner is an operator
+# override we preserve) and heal it. Idempotent no-op when already
+# salt-owned. Only fires in the legacy (HARDEN unset) case where
+# ``/opt/saltstack/salt`` is expected to be salt-owned.
+if [ "$SALT_ONEDIR_HARDEN" != "1" ] \
+   && [ -d "/opt/saltstack/salt" ] \
+   && [ "$(stat -c %U /opt/saltstack/salt 2>/dev/null)" = "root" ]; then
+    chown -R $SALT_USER:$SALT_GROUP /opt/saltstack/salt 2>/dev/null || true
+fi
+# Upgrade migration: hardened only, one-shot. Idempotent no-op if
+# the target already has content (previous migration already ran).
+if [ "$SALT_ONEDIR_HARDEN" = "1" ] && [ -n "$PY_VER" ] \
+   && [ -d "/opt/saltstack/salt/extras-${PY_VER}" ] \
+   && [ -n "$(ls -A /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null)" ] \
+   && [ -n "$SALT_EXTRAS_DIR" ]; then
+    # Ensure the migration target dir exists. The postinst-installer
+    # branch above (inside ``if [ $1 -gt 1 ]; else ...``) only runs
+    # when RPM reports $1 == 1 (fresh install). On Photon's tdnf a
+    # re-install can be reported as $1 > 1 even after a purge, in
+    # which case ``install -d $SALT_EXTRAS_DIR`` never ran and this
+    # migration block would otherwise skip. Creating it here is
+    # idempotent -- if it already exists this is a no-op.
+    install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_EXTRAS_DIR" 2>/dev/null || true
+    if [ -d "$SALT_EXTRAS_DIR" ] \
+       && [ -z "$(ls -A ${SALT_EXTRAS_DIR} 2>/dev/null)" ]; then
+        mv /opt/saltstack/salt/extras-${PY_VER}/* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+        mv /opt/saltstack/salt/extras-${PY_VER}/.[!.]* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+        rmdir /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null || true
+        chown -R $SALT_USER:$SALT_GROUP "$SALT_EXTRAS_DIR" || true
+    fi
+fi
 
-    %posttrans master
-    # Honor SALT_USER/SALT_GROUP overrides; same rationale as %posttrans cloud.
-    if [ -f /etc/sysconfig/salt-minion-setup ]; then
-        . /etc/sysconfig/salt-minion-setup
+%posttrans master
+# Honor SALT_USER/SALT_GROUP overrides; same rationale as %posttrans cloud.
+if [ -f /etc/sysconfig/salt-minion-setup ]; then
+    . /etc/sysconfig/salt-minion-setup
+fi
+[ -n "$SALT_USER" ] || SALT_USER=%{_SALT_USER}
+[ -n "$SALT_GROUP" ] || SALT_GROUP=%{_SALT_GROUP}
+# SALT_ONEDIR_HARDEN default is unset on 3006.x (legacy layout
+# preserved). The default flips on 3009.0. See issue #70198.
+PY_VER=$(/opt/saltstack/salt/bin/python3 -c "import sys; sys.stdout.write('{}.{}'.format(*sys.version_info)); sys.stdout.flush()" 2>/dev/null || echo "")
+if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+    [ -n "$SALT_HOME" ] || SALT_HOME=/var/lib/salt/master/home
+    if [ -z "$SALT_EXTRAS_DIR" ] && [ -n "$PY_VER" ]; then
+        SALT_EXTRAS_DIR=/var/lib/salt/master/extras-${PY_VER}
     fi
-    [ -n "$SALT_USER" ] || SALT_USER=%{_SALT_USER}
-    [ -n "$SALT_GROUP" ] || SALT_GROUP=%{_SALT_GROUP}
-    if [ ! -e "/var/log/salt/master" ]; then
-      touch /var/log/salt/master
-      chmod 640 /var/log/salt/master
-    fi
-    if [ ! -e "/var/log/salt/key" ]; then
-      touch /var/log/salt/key
-      chmod 640 /var/log/salt/key
-    fi
-    if [ $1 -gt 1 ] ; then
-        # Upgrade: preserve existing ownership, don't reset to defaults
-        :
+fi
+if [ ! -e "/var/log/salt/master" ]; then
+  touch /var/log/salt/master
+  chmod 640 /var/log/salt/master
+fi
+if [ ! -e "/var/log/salt/key" ]; then
+  touch /var/log/salt/key
+  chmod 640 /var/log/salt/key
+fi
+if [ $1 -gt 1 ] ; then
+    # Upgrade: preserve existing ownership, don't reset to defaults
+    :
+else
+    if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+        install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" /var/lib/salt/master
+        [ -n "$SALT_HOME" ] && install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_HOME"
+        [ -n "$SALT_EXTRAS_DIR" ] && install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_EXTRAS_DIR"
+        chown -R $SALT_USER:$SALT_GROUP /etc/salt/pki/master /etc/salt/master.d /var/log/salt/master /var/log/salt/key /var/cache/salt/master /var/run/salt/master
     else
         chown -R $SALT_USER:$SALT_GROUP /etc/salt/pki/master /etc/salt/master.d /var/log/salt/master /var/log/salt/key /var/cache/salt/master /var/run/salt/master /opt/saltstack/salt
+        if [ -n "$SALT_EXTRAS_DIR" ] && [ -d "$SALT_EXTRAS_DIR" ]; then
+            chown -R $SALT_USER:$SALT_GROUP "$SALT_EXTRAS_DIR" || true
+        fi
     fi
+fi
+# Post-upgrade healer: see %posttrans cloud for rationale.
+if [ "$SALT_ONEDIR_HARDEN" != "1" ] \
+   && [ -d "/opt/saltstack/salt" ] \
+   && [ "$(stat -c %U /opt/saltstack/salt 2>/dev/null)" = "root" ]; then
+    chown -R $SALT_USER:$SALT_GROUP /opt/saltstack/salt 2>/dev/null || true
+fi
+# Upgrade migration: hardened only, one-shot. Idempotent no-op if
+# the target already has content (previous migration already ran).
+if [ "$SALT_ONEDIR_HARDEN" = "1" ] && [ -n "$PY_VER" ] \
+   && [ -d "/opt/saltstack/salt/extras-${PY_VER}" ] \
+   && [ -n "$(ls -A /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null)" ] \
+   && [ -n "$SALT_EXTRAS_DIR" ]; then
+    # Ensure the migration target dir exists. The postinst-installer
+    # branch above (inside ``if [ $1 -gt 1 ]; else ...``) only runs
+    # when RPM reports $1 == 1 (fresh install). On Photon's tdnf a
+    # re-install can be reported as $1 > 1 even after a purge, in
+    # which case ``install -d $SALT_EXTRAS_DIR`` never ran and this
+    # migration block would otherwise skip. Creating it here is
+    # idempotent -- if it already exists this is a no-op.
+    install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_EXTRAS_DIR" 2>/dev/null || true
+    if [ -d "$SALT_EXTRAS_DIR" ] \
+       && [ -z "$(ls -A ${SALT_EXTRAS_DIR} 2>/dev/null)" ]; then
+        mv /opt/saltstack/salt/extras-${PY_VER}/* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+        mv /opt/saltstack/salt/extras-${PY_VER}/.[!.]* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+        rmdir /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null || true
+        chown -R $SALT_USER:$SALT_GROUP "$SALT_EXTRAS_DIR" || true
+    fi
+fi
 
 
-    %posttrans syndic
-    # Honor SALT_USER/SALT_GROUP overrides; same rationale as %posttrans cloud.
-    if [ -f /etc/sysconfig/salt-minion-setup ]; then
-        . /etc/sysconfig/salt-minion-setup
+%posttrans syndic
+# Honor SALT_USER/SALT_GROUP overrides; same rationale as %posttrans cloud.
+if [ -f /etc/sysconfig/salt-minion-setup ]; then
+    . /etc/sysconfig/salt-minion-setup
+fi
+[ -n "$SALT_USER" ] || SALT_USER=%{_SALT_USER}
+[ -n "$SALT_GROUP" ] || SALT_GROUP=%{_SALT_GROUP}
+PY_VER=$(/opt/saltstack/salt/bin/python3 -c "import sys; sys.stdout.write('{}.{}'.format(*sys.version_info)); sys.stdout.flush()" 2>/dev/null || echo "")
+if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+    [ -n "$SALT_HOME" ] || SALT_HOME=/var/lib/salt/syndic/home
+    if [ -z "$SALT_EXTRAS_DIR" ] && [ -n "$PY_VER" ]; then
+        SALT_EXTRAS_DIR=/var/lib/salt/syndic/extras-${PY_VER}
     fi
-    [ -n "$SALT_USER" ] || SALT_USER=%{_SALT_USER}
-    [ -n "$SALT_GROUP" ] || SALT_GROUP=%{_SALT_GROUP}
-    if [ ! -e "/var/log/salt/syndic" ]; then
-      touch /var/log/salt/syndic
-      chmod 640 /var/log/salt/syndic
-    fi
-    if [ $1 -gt 1 ] ; then
-        # Upgrade: preserve existing ownership, don't reset to defaults
-        :
+fi
+if [ ! -e "/var/log/salt/syndic" ]; then
+  touch /var/log/salt/syndic
+  chmod 640 /var/log/salt/syndic
+fi
+if [ $1 -gt 1 ] ; then
+    # Upgrade: preserve existing ownership, don't reset to defaults
+    :
+else
+    if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+        install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" /var/lib/salt/syndic
+        [ -n "$SALT_HOME" ] && install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_HOME"
+        [ -n "$SALT_EXTRAS_DIR" ] && install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_EXTRAS_DIR"
+        chown -R $SALT_USER:$SALT_GROUP /var/log/salt/syndic
     else
         chown -R $SALT_USER:$SALT_GROUP /var/log/salt/syndic /opt/saltstack/salt
+        if [ -n "$SALT_EXTRAS_DIR" ] && [ -d "$SALT_EXTRAS_DIR" ]; then
+            chown -R $SALT_USER:$SALT_GROUP "$SALT_EXTRAS_DIR" || true
+        fi
     fi
+fi
+# Post-upgrade healer: see %posttrans cloud for rationale.
+if [ "$SALT_ONEDIR_HARDEN" != "1" ] \
+   && [ -d "/opt/saltstack/salt" ] \
+   && [ "$(stat -c %U /opt/saltstack/salt 2>/dev/null)" = "root" ]; then
+    chown -R $SALT_USER:$SALT_GROUP /opt/saltstack/salt 2>/dev/null || true
+fi
+# Upgrade migration: hardened only, one-shot. Idempotent no-op if
+# the target already has content (previous migration already ran).
+if [ "$SALT_ONEDIR_HARDEN" = "1" ] && [ -n "$PY_VER" ] \
+   && [ -d "/opt/saltstack/salt/extras-${PY_VER}" ] \
+   && [ -n "$(ls -A /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null)" ] \
+   && [ -n "$SALT_EXTRAS_DIR" ]; then
+    # Ensure the migration target dir exists. The postinst-installer
+    # branch above (inside ``if [ $1 -gt 1 ]; else ...``) only runs
+    # when RPM reports $1 == 1 (fresh install). On Photon's tdnf a
+    # re-install can be reported as $1 > 1 even after a purge, in
+    # which case ``install -d $SALT_EXTRAS_DIR`` never ran and this
+    # migration block would otherwise skip. Creating it here is
+    # idempotent -- if it already exists this is a no-op.
+    install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_EXTRAS_DIR" 2>/dev/null || true
+    if [ -d "$SALT_EXTRAS_DIR" ] \
+       && [ -z "$(ls -A ${SALT_EXTRAS_DIR} 2>/dev/null)" ]; then
+        mv /opt/saltstack/salt/extras-${PY_VER}/* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+        mv /opt/saltstack/salt/extras-${PY_VER}/.[!.]* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+        rmdir /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null || true
+        chown -R $SALT_USER:$SALT_GROUP "$SALT_EXTRAS_DIR" || true
+    fi
+fi
 
 
-    %posttrans api
-    # Honor SALT_USER/SALT_GROUP overrides; same rationale as %posttrans cloud.
-    if [ -f /etc/sysconfig/salt-minion-setup ]; then
-        . /etc/sysconfig/salt-minion-setup
+%posttrans api
+# Honor SALT_USER/SALT_GROUP overrides; same rationale as %posttrans cloud.
+if [ -f /etc/sysconfig/salt-minion-setup ]; then
+    . /etc/sysconfig/salt-minion-setup
+fi
+[ -n "$SALT_USER" ] || SALT_USER=%{_SALT_USER}
+[ -n "$SALT_GROUP" ] || SALT_GROUP=%{_SALT_GROUP}
+PY_VER=$(/opt/saltstack/salt/bin/python3 -c "import sys; sys.stdout.write('{}.{}'.format(*sys.version_info)); sys.stdout.flush()" 2>/dev/null || echo "")
+if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+    [ -n "$SALT_HOME" ] || SALT_HOME=/var/lib/salt/api/home
+    if [ -z "$SALT_EXTRAS_DIR" ] && [ -n "$PY_VER" ]; then
+        SALT_EXTRAS_DIR=/var/lib/salt/api/extras-${PY_VER}
     fi
-    [ -n "$SALT_USER" ] || SALT_USER=%{_SALT_USER}
-    [ -n "$SALT_GROUP" ] || SALT_GROUP=%{_SALT_GROUP}
-    if [ ! -e "/var/log/salt/api" ]; then
-      touch /var/log/salt/api
-      chmod 640 /var/log/salt/api
-    fi
-    if [ $1 -gt 1 ] ; then
-        # Upgrade: preserve existing ownership, don't reset to defaults
-        :
+fi
+if [ ! -e "/var/log/salt/api" ]; then
+  touch /var/log/salt/api
+  chmod 640 /var/log/salt/api
+fi
+if [ $1 -gt 1 ] ; then
+    # Upgrade: preserve existing ownership, don't reset to defaults
+    :
+else
+    if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+        install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" /var/lib/salt/api
+        [ -n "$SALT_HOME" ] && install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_HOME"
+        [ -n "$SALT_EXTRAS_DIR" ] && install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_EXTRAS_DIR"
+        chown -R $SALT_USER:$SALT_GROUP /var/log/salt/api
     else
         chown -R $SALT_USER:$SALT_GROUP /var/log/salt/api /opt/saltstack/salt
+        if [ -n "$SALT_EXTRAS_DIR" ] && [ -d "$SALT_EXTRAS_DIR" ]; then
+            chown -R $SALT_USER:$SALT_GROUP "$SALT_EXTRAS_DIR" || true
+        fi
     fi
+fi
+# Post-upgrade healer: see %posttrans cloud for rationale.
+if [ "$SALT_ONEDIR_HARDEN" != "1" ] \
+   && [ -d "/opt/saltstack/salt" ] \
+   && [ "$(stat -c %U /opt/saltstack/salt 2>/dev/null)" = "root" ]; then
+    chown -R $SALT_USER:$SALT_GROUP /opt/saltstack/salt 2>/dev/null || true
+fi
+# Upgrade migration: hardened only, one-shot. Idempotent no-op if
+# the target already has content (previous migration already ran).
+if [ "$SALT_ONEDIR_HARDEN" = "1" ] && [ -n "$PY_VER" ] \
+   && [ -d "/opt/saltstack/salt/extras-${PY_VER}" ] \
+   && [ -n "$(ls -A /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null)" ] \
+   && [ -n "$SALT_EXTRAS_DIR" ]; then
+    # Ensure the migration target dir exists. The postinst-installer
+    # branch above (inside ``if [ $1 -gt 1 ]; else ...``) only runs
+    # when RPM reports $1 == 1 (fresh install). On Photon's tdnf a
+    # re-install can be reported as $1 > 1 even after a purge, in
+    # which case ``install -d $SALT_EXTRAS_DIR`` never ran and this
+    # migration block would otherwise skip. Creating it here is
+    # idempotent -- if it already exists this is a no-op.
+    install -d -m 0755 -o "$SALT_USER" -g "$SALT_GROUP" "$SALT_EXTRAS_DIR" 2>/dev/null || true
+    if [ -d "$SALT_EXTRAS_DIR" ] \
+       && [ -z "$(ls -A ${SALT_EXTRAS_DIR} 2>/dev/null)" ]; then
+        mv /opt/saltstack/salt/extras-${PY_VER}/* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+        mv /opt/saltstack/salt/extras-${PY_VER}/.[!.]* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+        rmdir /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null || true
+        chown -R $SALT_USER:$SALT_GROUP "$SALT_EXTRAS_DIR" || true
+    fi
+fi
 
 %posttrans minion
 
@@ -839,6 +1151,21 @@ fi
 if [ ! -e "/var/log/salt/key" ]; then
   touch /var/log/salt/key
   chmod 640 /var/log/salt/key
+fi
+
+# SALT_ONEDIR_HARDEN default is unset on 3006.x (legacy layout
+# preserved). Operators opt in explicitly via SALT_ONEDIR_HARDEN=1. The
+# default flips on 3009.0. See issue #70198. Read setup file early so
+# hardening flag/paths are visible in both branches below.
+if [ -f /etc/sysconfig/salt-minion-setup ]; then
+    . /etc/sysconfig/salt-minion-setup
+fi
+PY_VER=$(/opt/saltstack/salt/bin/python3 -c "import sys; sys.stdout.write('{}.{}'.format(*sys.version_info)); sys.stdout.flush()" 2>/dev/null || echo "")
+if [ "$SALT_ONEDIR_HARDEN" = "1" ] && [ -z "$SALT_EXTRAS_DIR" ] && [ -n "$PY_VER" ]; then
+    SALT_EXTRAS_DIR=/var/lib/salt/minion/extras-${PY_VER}
+fi
+if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+    [ -n "$SALT_HOME" ] || SALT_HOME=/var/lib/salt/minion/home
 fi
 
 # Check for preserved ownership marker (from %pre)
@@ -864,8 +1191,28 @@ if [ -f "/tmp/.salt-minion-upgrade-ownership" ]; then
     chown $OWNERSHIP /var/cache/salt/minion/proc
     chmod 750 /var/cache/salt/minion/proc
 
-    # Restore ownership of the main installation directory for salt-pip access
-    chown -R $OWNERSHIP /opt/saltstack/salt
+    if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+        # Hardened: keep /opt/saltstack/salt root-owned; chown only the
+        # per-daemon writable dirs. See issue #70198.
+        install -d -m 0755 -o "${OWNERSHIP%:*}" -g "${OWNERSHIP#*:}" /var/lib/salt/minion
+        install -d -m 0755 -o "${OWNERSHIP%:*}" -g "${OWNERSHIP#*:}" "$SALT_HOME"
+        [ -n "$SALT_EXTRAS_DIR" ] && install -d -m 0755 -o "${OWNERSHIP%:*}" -g "${OWNERSHIP#*:}" "$SALT_EXTRAS_DIR"
+        # Upgrade migration: move populated legacy extras into new
+        # per-daemon location. Idempotent no-op if already migrated.
+        if [ -n "$PY_VER" ] \
+           && [ -d "/opt/saltstack/salt/extras-${PY_VER}" ] \
+           && [ -n "$(ls -A /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null)" ] \
+           && [ -d "$SALT_EXTRAS_DIR" ] \
+           && [ -z "$(ls -A ${SALT_EXTRAS_DIR} 2>/dev/null)" ]; then
+            mv /opt/saltstack/salt/extras-${PY_VER}/* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+            mv /opt/saltstack/salt/extras-${PY_VER}/.[!.]* "$SALT_EXTRAS_DIR"/ 2>/dev/null || true
+            rmdir /opt/saltstack/salt/extras-${PY_VER} 2>/dev/null || true
+            chown -R $OWNERSHIP "$SALT_EXTRAS_DIR" || true
+        fi
+    else
+        # Restore ownership of the main installation directory for salt-pip access
+        chown -R $OWNERSHIP /opt/saltstack/salt
+    fi
 
     # Clean up
     rm -f /tmp/.salt-minion-upgrade-ownership
@@ -873,11 +1220,6 @@ if [ -f "/tmp/.salt-minion-upgrade-ownership" ]; then
 
 else
     # Fresh install or upgrade from root
-
-    # Check for configuration file in /etc/sysconfig/salt-minion-setup
-    if [ -f /etc/sysconfig/salt-minion-setup ]; then
-        . /etc/sysconfig/salt-minion-setup
-    fi
 
     # SALT_MINION_USER is the historical minion-specific knob; SALT_USER
     # is the new generic knob from issue #69402. Either may be set in
@@ -889,13 +1231,39 @@ else
     # For fresh installs, set ownership based on environment variables or defaults
     if [ -n "$_MN_USER" ] && [ "$_MN_USER" != "root" ]; then
         chown -R $_MN_USER:$_MN_GROUP /etc/salt/pki/minion /etc/salt/minion.d /var/log/salt/minion /var/cache/salt/minion /var/run/salt/minion /var/log/salt /var/cache/salt
-        # Ensure the main installation directory is also owned by the salt user for salt-pip
-        chown -R $_MN_USER:$_MN_GROUP /opt/saltstack/salt
-        # Also chown an explicitly relocated extras dir if set.
-        if [ -n "$SALT_EXTRAS_DIR" ] && [ -d "$SALT_EXTRAS_DIR" ]; then
-            chown -R $_MN_USER:$_MN_GROUP "$SALT_EXTRAS_DIR"
+        if [ "$SALT_ONEDIR_HARDEN" = "1" ]; then
+            # Hardened: per-daemon writable dirs only; /opt/saltstack/salt
+            # stays root:root 0755. See issue #70198.
+            install -d -m 0755 -o "$_MN_USER" -g "$_MN_GROUP" /var/lib/salt/minion
+            install -d -m 0755 -o "$_MN_USER" -g "$_MN_GROUP" "$SALT_HOME"
+            [ -n "$SALT_EXTRAS_DIR" ] && install -d -m 0755 -o "$_MN_USER" -g "$_MN_GROUP" "$SALT_EXTRAS_DIR"
+        else
+            # Ensure the main installation directory is also owned by the salt user for salt-pip
+            chown -R $_MN_USER:$_MN_GROUP /opt/saltstack/salt
+            # Also chown an explicitly relocated extras dir if set.
+            if [ -n "$SALT_EXTRAS_DIR" ] && [ -d "$SALT_EXTRAS_DIR" ]; then
+                chown -R $_MN_USER:$_MN_GROUP "$SALT_EXTRAS_DIR"
+            fi
         fi
     fi
+fi
+
+# Post-upgrade healer: on Photon's tdnf, RPM upgrade resets the
+# /opt/saltstack/salt directory ownership to root even when the tree
+# was salt-owned before the transaction. In the legacy (HARDEN unset)
+# case the tree is expected to be salt-owned; detect an accidental
+# root-reset (only tree.owner=='root' is treated as accidental so
+# operator overrides to other users are preserved) and heal it.
+# Falls back to the built-in ``salt`` user/group when SALT_USER
+# wasn't set via /etc/sysconfig/salt-minion-setup (the common case
+# on default installs where the minion posttrans is the sole
+# ownership-touching scriptlet).
+if [ "$SALT_ONEDIR_HARDEN" != "1" ] \
+   && [ -d "/opt/saltstack/salt" ] \
+   && [ "$(stat -c %U /opt/saltstack/salt 2>/dev/null)" = "root" ]; then
+    _HEAL_USER=${SALT_USER:-%{_SALT_USER}}
+    _HEAL_GROUP=${SALT_GROUP:-%{_SALT_GROUP}}
+    chown -R ${_HEAL_USER}:${_HEAL_GROUP} /opt/saltstack/salt 2>/dev/null || true
 fi
 
 # Restart, or start, the minion service.
@@ -907,12 +1275,18 @@ fi
 # unit was previously active. The marker file is dropped in ``%pre
 # minion`` only when ``is-active`` was true at the start of the
 # upgrade transaction. See issue #69605.
+#
+# In the self-upgrade case (issue #69656) the minion is *still*
+# running here -- ``%pre`` skipped the stop -- so ``systemctl start``
+# is a no-op. The FAQ ``cmd.run bg: True`` pattern in the state that
+# drove this transaction restarts the minion once the state returns.
 if [ -f /tmp/.salt-minion-upgrade-was-active ]; then
     /bin/systemctl start salt-minion.service >/dev/null 2>&1 || :
     rm -f /tmp/.salt-minion-upgrade-was-active
 else
     /bin/systemctl try-restart salt-minion.service >/dev/null 2>&1 || :
 fi
+rm -f /tmp/.salt-minion-self-upgrade
 
 
 %preun
@@ -1395,6 +1769,11 @@ fi
 - Migrate Salt documentation to the PyData Sphinx theme. This update modernizes the documentation UI, improves navigation with a persistent sidebar tree, and fixes issues with embedded video playback. [#69185](https://github.com/saltstack/salt/issues/69185)
 - fix etcdv3 module authentification when using etcd3-py lib [#69202](https://github.com/saltstack/salt/issues/69202)
 - Added ``lgpo_reg.get_rsop_value`` to query the Resultant Set of Policy (RSoP) for a registry key/value and detect whether it is managed by a Domain Group Policy Object. The ``lgpo_reg`` module functions ``set_value``, ``disable_value``, and ``delete_value`` now log a warning when a Domain GPO is detected for the target value. The ``lgpo_reg`` state functions ``value_present``, ``value_disabled``, and ``value_absent`` append the same warning to the state comment so it is visible in state output. [#69205](https://github.com/saltstack/salt/issues/69205)
+* Thu Jul 23 2026 Salt Project Packaging <saltproject-packaging@vmware.com> - 3008.1-1
+
+# Fixed
+
+- Deferred OpenTelemetry imports in `salt.utils.tracing` and `salt.utils.metrics` so daemons no longer pay the ~15 MB per-process OTel import cost when `tracing.enabled` / `metrics.enabled` are false (the default). On a stress-tested salt-master container (~15 Python processes) this reclaims ~225 MB per subsystem — restoring the pre-3008.x baseline. [#69855](https://github.com/saltstack/salt/issues/69855)
 
 
 * Thu Jun 11 2026 Salt Project Packaging <saltproject-packaging@vmware.com> - 3008.1

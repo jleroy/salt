@@ -2204,16 +2204,34 @@ def add_repo_key(
     if not isinstance(keydir, pathlib.Path):
         keydir = pathlib.Path(keydir)
     if not aptkey and not keydir.is_dir():
-        log.error(
-            "The directory %s does not exist. Please create this directory only writable by root",
-            keydir,
-        )
-        return False
+        # Debian 11 / Ubuntu 22.04 ship apt versions that support the
+        # ``/etc/apt/keyrings/`` convention but do not create the
+        # directory on install.  apt-secure(8) explicitly documents that
+        # admins may create it themselves; do that on their behalf with
+        # the standard root-owned, world-readable 0755 mode so the
+        # ``salt://key -> add_repo_key(aptkey=False)`` workflow works
+        # out of the box on those distros.  If we cannot create it
+        # (e.g. read-only fs, EPERM), fall through to the pre-existing
+        # error path -- do not silently succeed.
+        try:
+            keydir.mkdir(mode=0o755, parents=True, exist_ok=True)
+        except OSError as exc:
+            log.error(
+                "The directory %s does not exist and could not be created: %s."
+                " Please create this directory writable only by root.",
+                keydir,
+                exc,
+            )
+            return False
 
     if not salt.utils.path.which("apt-key"):
         aptkey = False
     cmd = ["apt-key"]
     kwargs = {}
+    # NOTE: Populated below only for the ``not aptkey`` + ``keyserver``
+    #   branch, so that the keyring file gpg writes can be chmod'd to be
+    #   world-readable afterwards (see the matching os.chmod() call below).
+    keyring_file = None
 
     # If the keyid is provided or determined, check it against the existing
     # repo key ids to determine whether it needs to be imported.
@@ -2243,7 +2261,16 @@ def add_repo_key(
                 keyfile = key.name
                 if keyfile.endswith(".decrypted"):
                     keyfile = keyfile[:-10]
-            shutil.copyfile(str(key), str(keydir / keyfile))
+            dest = keydir / keyfile
+            shutil.copyfile(str(key), str(dest))
+            # NOTE: shutil.copyfile() does not copy permission bits, so the
+            #   destination file's mode is subject to the process umask. On
+            #   systems hardened with a restrictive umask (e.g. 077), this
+            #   left the keyring unreadable by the unprivileged _apt user,
+            #   causing "NO_PUBKEY" errors on the next apt-get update. Force
+            #   a sane, world-readable mode to match what apt-secure(8)
+            #   expects of keyring files.
+            os.chmod(str(dest), 0o644)
             return True
         else:
             cmd.extend(["add", cached_source_path])
@@ -2263,11 +2290,12 @@ def add_repo_key(
                     "You must define the name of the key file to save the key. See keyfile argument"
                 )
                 return False
+            keyring_file = keydir / keyfile
             cmd = [
                 "gpg",
                 "--no-default-keyring",
                 "--keyring",
-                keydir / keyfile,
+                keyring_file,
                 "--keyserver",
                 keyserver,
                 "--recv-keys",
@@ -2286,6 +2314,12 @@ def add_repo_key(
     cmd_ret = _call_apt(cmd, **kwargs)
 
     if cmd_ret["retcode"] == 0:
+        if keyring_file is not None:
+            # NOTE: gpg creates keyring files subject to the process umask,
+            #   which can leave them unreadable by the unprivileged _apt
+            #   user on systems with a restrictive umask. See the longer
+            #   explanation above the other os.chmod() call in this function.
+            os.chmod(str(keyring_file), 0o644)
         return True
     log.error("Unable to add repo key: %s", cmd_ret["stderr"])
     return False
