@@ -44,9 +44,9 @@ def _kill_gpg_agent(root):
 
 
 @pytest.fixture
-def gpghome(tmp_path):
-    root = tmp_path / "gpghome"
-    root.mkdir(mode=0o0700)
+def gpghome(socket_tmp_path):
+    root = socket_tmp_path
+    root.chmod(0o0700)
     try:
         yield root
     finally:

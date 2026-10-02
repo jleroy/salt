@@ -102,6 +102,8 @@ def test_exit_status_unknown_argument(salt_master, proxy_minion_id):
 # Hangs on Windows. You can add a timeout to the proxy.run command, but then
 # it just times out.
 @pytest.mark.skip_on_windows(reason=PRE_PYTEST_SKIP_REASON)
+# GitHub's macOS CI can be really slow sometimes.
+@pytest.mark.timeout_unless_on_windows(180)
 def test_exit_status_correct_usage(salt_master, proxy_minion_id, salt_cli):
     """
     Ensure correct exit status when salt-proxy starts correctly.

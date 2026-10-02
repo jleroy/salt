@@ -6,12 +6,17 @@ import pytest
 
 import salt.utils.event
 
-# Cluster bring-up + minion auth + a publish round-trip routinely brushes
-# against the 90 s default test timeout on slow CI runners (Photon ARM64
-# fips, Ubuntu ARM64). Cluster tests pay the cost of Raft elections plus
-# multi-master peer key exchange before any test work can run; give them
-# headroom rather than masking the symptom by skipping.
-pytestmark = [pytest.mark.timeout(240)]
+pytestmark = [
+    # macOS / FreeBSD: Configuring IP aliases on lo0 interface using ifconfig
+    # (see conftest.py) require to be root.
+    pytest.mark.skip_if_not_root,
+    # Cluster bring-up + minion auth + a publish round-trip routinely brushes
+    # against the 90 s default test timeout on slow CI runners (Photon ARM64
+    # fips, Ubuntu ARM64). Cluster tests pay the cost of Raft elections plus
+    # multi-master peer key exchange before any test work can run; give them
+    # headroom rather than masking the symptom by skipping.
+    pytest.mark.timeout(240),
+]
 
 
 def test_basic_cluster_setup(

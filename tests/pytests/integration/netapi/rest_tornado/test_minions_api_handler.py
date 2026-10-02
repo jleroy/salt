@@ -6,6 +6,9 @@ from tornado.httpclient import HTTPError
 import salt.utils.json
 from salt.netapi.rest_tornado import saltnado
 
+# GitHub's macOS CI can be slow.
+pytestmark = [pytest.mark.timeout_unless_on_windows(180)]
+
 
 @pytest.fixture
 def app_urls():
@@ -15,10 +18,14 @@ def app_urls():
     ]
 
 
+@pytest.mark.async_timeout(seconds=120)
 async def test_get_no_mid(http_client, salt_minion, salt_sub_minion):
     # Under CI load the sub-minion can lag the primary; poll until both answer.
+    # The harness wraps async tests in asyncio.wait_for(timeout=async_timeout),
+    # so keep the polling deadline comfortably under it to let the graceful
+    # pytest.fail path (and the final fetch) run before the hard cancellation.
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + 120
+    deadline = loop.time() + 90
     response_obj = None
     while loop.time() < deadline:
         response = await http_client.fetch(
@@ -126,6 +133,7 @@ async def test_post_with_incorrect_client(http_client):
 
 
 @pytest.mark.slow_test
+@pytest.mark.async_timeout(seconds=120)
 async def test_mem_leak_in_event_listener(http_client, salt_minion, app):
     for i in range(10):
         await http_client.fetch(

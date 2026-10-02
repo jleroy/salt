@@ -14,6 +14,7 @@ import salt.master
 import salt.payload
 import salt.utils.event
 import salt.utils.files
+import salt.utils.platform
 import salt.utils.stringutils
 from salt.master import SMaster
 from tests.support.mock import AsyncMock, MagicMock, patch

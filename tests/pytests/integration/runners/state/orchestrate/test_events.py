@@ -18,6 +18,9 @@ import salt.utils.pycrypto
 
 log = logging.getLogger(__name__)
 
+# GitHub's macOS CI can be slow.
+pytestmark = [pytest.mark.timeout_unless_on_windows(180)]
+
 
 @attr.s(kw_only=True, slots=True)
 class TestMasterAccount:
@@ -165,7 +168,10 @@ def test_jid_in_ret_event(salt_run_cli, salt_master, salt_minion, event_listener
         start_time = time.time()
         jid = salt.utils.jid.gen_jid(salt_master.config)
 
-        ret = salt_run_cli.run("--jid", jid, "state.orchestrate", "test-orch")
+        # GitHub's macOS CI can be slow.
+        ret = salt_run_cli.run(
+            "--jid", jid, "state.orchestrate", "test-orch", _timeout=180
+        )
         assert ret.returncode == 0
         orch_job_data = ret.data
         for step_data in orch_job_data["data"][salt_master.id].values():

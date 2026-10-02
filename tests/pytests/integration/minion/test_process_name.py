@@ -2,7 +2,12 @@
 Test process name behavior with multiprocessing enabled and disabled.
 """
 
+import pytest
+
 from tests.conftest import FIPS_TESTRUN
+
+# GitHub's macOS CI can be slow.
+pytestmark = [pytest.mark.timeout_unless_on_windows(180)]
 
 
 def _master_fips_overrides():

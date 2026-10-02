@@ -5,6 +5,9 @@ from saltfactories.utils import random_string
 
 from tests.conftest import FIPS_TESTRUN
 
+# GitHub's macOS CI can be slow.
+pytestmark = [pytest.mark.timeout_unless_on_windows(180)]
+
 
 @pytest.fixture(scope="module")
 def pillar_state_tree(tmp_path_factory):

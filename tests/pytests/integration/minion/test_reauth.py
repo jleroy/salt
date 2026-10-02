@@ -1,6 +1,11 @@
 import time
 
+import pytest
+
 from tests.conftest import FIPS_TESTRUN
+
+# GitHub's macOS CI can be slow.
+pytestmark = [pytest.mark.timeout_unless_on_windows(180)]
 
 
 def test_reauth(salt_master_factory, event_listener):

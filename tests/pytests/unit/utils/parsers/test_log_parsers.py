@@ -43,6 +43,14 @@ class LogImplMock:
         self._real_set_logging_options_dict = salt._logging.set_logging_options_dict
         self._real_get_logging_options_dict = salt._logging.get_logging_options_dict
         self._real_setup_logfile_handler = salt._logging.setup_logfile_handler
+        # The parsers call the real (unmocked) freeze_logging_options_dict()
+        # during __setup_logging_config, which turns the process-global logging
+        # options dict into an immutable one. A test in another module that
+        # parses a salt parser leaves it frozen, so the first test here would
+        # hit "The logging options have been frozen" before _destroy() can reset
+        # it at teardown. Reset it now (symmetrically to _destroy) so the test
+        # body starts from an unfrozen dict regardless of global state.
+        salt._logging.set_logging_options_dict.__options_dict__ = self.original_config
 
     def _destroy(self):
         salt._logging.set_logging_options_dict.__options_dict__ = self.original_config

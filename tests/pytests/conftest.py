@@ -80,6 +80,27 @@ class ReactorEvent:
     event_tag = attr.ib()
 
 
+@pytest.fixture
+def socket_tmp_path(tmp_path):
+    """
+    Temporary directory whose path is short enough for AF_UNIX sockets.
+
+    pytest's ``tmp_path`` is rooted at ``<system-tmp>/pytest-of-<user>/pytest-N/
+    <test-name>/``; on macOS a socket created under it easily exceeds the
+    104-character AF_UNIX limit (``OSError: AF_UNIX path too long``). There we
+    return a short ``tempfile.mkdtemp()`` directory instead and remove it when
+    the test finishes.
+    """
+    if not salt.utils.platform.is_darwin():
+        yield tmp_path
+        return
+    path = pathlib.Path(tempfile.mkdtemp())
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 @pytest.fixture(scope="session")
 def reactor_event(tmp_path_factory):
 
