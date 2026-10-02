@@ -3941,13 +3941,10 @@ class MasterPubServerChannel:
             # A closed stream, a refused/timed-out connect to a peer that isn't
             # listening yet (normal during bring-up), or any other socket error
             # all mean the same thing here: the push didn't land, reset and
-            # retry. asyncio.TimeoutError/ConnectionError are subclasses of
-            # OSError, but list them for clarity.
-            except (
-                tornado.iostream.StreamClosedError,
-                asyncio.TimeoutError,
-                OSError,
-            ):
+            # retry.
+            # asyncio.TimeoutError and tornado.iostream.StreamClosedError are
+            # subclasses of OSError.
+            except OSError:
                 if task.get_name() == self.opts["id"]:
                     log.error("Unable to forward event to local ipc bus")
                 else:
