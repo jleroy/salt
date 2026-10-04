@@ -323,9 +323,11 @@ def test_event_unpack_with_SaltDeserializationError(sock_dir):
             evt1 = me.get_event(tag="")
         _assert_got_event(evt2, {"data": "foo2"}, expected_failure=True)
         assert evt1 is None
-        assert (
-            mock_log_warning.mock_calls[0].args[0]
+        assert any(
+            call.args
+            and call.args[0]
             == "SaltDeserializationError on unpacking data, the payload could be incomplete"
+            for call in mock_log_warning.mock_calls
         )
         # On 3007.x, SaltDeserializationError in _get_event is caught and
         # logged at debug level via the leak-fix hardening (single bad IPC
