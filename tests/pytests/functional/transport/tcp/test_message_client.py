@@ -72,9 +72,9 @@ def client(io_loop, config):
         client.close()
 
 
-async def test_message_client_reconnect(config, client, server):
+async def test_publish_client_reconnect(config, client, server):
     """
-    Verify that the tcp MessageClient class re-sets it's unpacker after a
+    Verify that the TCP PublishClient resets its unpacker after a
     stream disconnect.
     """
 
