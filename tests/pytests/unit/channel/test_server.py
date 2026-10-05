@@ -20,6 +20,50 @@ from salt.master import SMaster
 from tests.support.mock import AsyncMock, MagicMock, patch
 
 
+@pytest.mark.parametrize("async_verify", [False, True])
+@pytest.mark.parametrize("verified", [False, True])
+async def test_pub_server_presence_after_unpickle(async_verify, verified):
+    """
+    Ensure a spawned channel rebuilds AES verification before presence checks.
+
+    Exercise both synchronous and asynchronous verifiers, with accepted and
+    rejected minions, because ``__setstate__`` bypasses ``__init__``.
+    """
+    parent_aes = MagicMock()
+    child_aes = MagicMock()
+    verifier = AsyncMock if async_verify else MagicMock
+    child_aes.verify_minion = verifier(return_value=verified)
+    transport = MagicMock()
+    subscriber = MagicMock(id_=None)
+    with patch("salt.master.AESFuncs", side_effect=[parent_aes, child_aes]), patch(
+        "salt.utils.event.get_event"
+    ), patch("salt.utils.minions.CkMinions"), patch(
+        "salt.crypt.MasterKeys"
+    ), patch.dict(
+        SMaster.secrets, {"aes": {"secret": MagicMock(value="test-key")}}
+    ), patch(
+        "salt.channel.server._get_crypticle"
+    ) as crypticle:
+        crypticle.return_value.loads.return_value = {"id": "minion", "tok": "token"}
+        original = server.PubServerChannel({}, transport)
+        restored = server.PubServerChannel.__new__(server.PubServerChannel)
+        restored.__setstate__(original.__getstate__())
+        try:
+            await restored.presence_callback(
+                subscriber, {"enc": "aes", "load": b"payload"}
+            )
+            child_aes.verify_minion.assert_called_once_with("minion", "token")
+            parent_aes.verify_minion.assert_not_called()
+            if async_verify:
+                child_aes.verify_minion.assert_awaited_once()
+            assert subscriber.id_ == ("minion" if verified else None)
+            assert restored.present == ({"minion": {subscriber}} if verified else {})
+        finally:
+            original.close()
+            restored.close()
+        child_aes.destroy.assert_called_once_with()
+
+
 @pytest.fixture
 def key_data():
     return [
