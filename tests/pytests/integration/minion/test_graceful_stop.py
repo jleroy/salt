@@ -67,6 +67,10 @@ def running_minion(salt_master):
             "signing_algorithm": "PKCS1v15-SHA224" if FIPS_TESTRUN else "PKCS1v15-SHA1",
         },
     )
+    # Remove the accepted key so later wildcard jobs do not target this stopped minion.
+    factory.after_terminate(
+        pytest.helpers.remove_stale_minion_key, salt_master, factory.id
+    )
     with factory.started(start_timeout=60):
         yield factory
 
