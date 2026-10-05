@@ -304,6 +304,9 @@ def test_run_user_not_available():
 
 
 @pytest.mark.skip_on_windows
+@pytest.mark.skip_on_darwin(
+    reason="macOS uses inline su instead of separate environment retrieval"
+)
 def test_run_runas_env_retrieval_timeout(caplog):
     """
     Regression test for issue #63901 / PR #63912.
@@ -344,10 +347,8 @@ def test_run_runas_env_retrieval_timeout(caplog):
     fake_pw = MagicMock(pw_name="baz", pw_shell="/bin/sh")
 
     with patch("salt.modules.cmdmod._is_valid_shell", mock_true), patch(
-        "salt.utils.platform.is_windows", MagicMock(return_value=False)
-    ), patch("os.path.isfile", mock_true), patch("os.access", mock_true), patch(
-        "os.path.isabs", mock_true
-    ), patch(
+        "os.path.isfile", mock_true
+    ), patch("os.access", mock_true), patch("os.path.isabs", mock_true), patch(
         "os.path.isdir", mock_true
     ), patch(
         "pwd.getpwnam", MagicMock(return_value=fake_pw)
@@ -366,6 +367,9 @@ def test_run_runas_env_retrieval_timeout(caplog):
         with caplog.at_level(logging.ERROR, logger="salt.modules.cmdmod"):
             # Must not raise; TimeoutExpired must be caught inside _run.
             ret = cmdmod._run("echo hi", "bar", runas="baz", python_shell=True)
+
+    env_popen_instance.communicate.assert_called_once()
+    assert env_popen_instance.communicate.call_args.kwargs["timeout"] == 10
 
     # The fix routes the TimeoutExpired into the existing "Environment
     # could not be retrieved" error log.
