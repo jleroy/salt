@@ -27,6 +27,7 @@ import os
 import pathlib
 import sys
 
+import distro
 import pytest
 
 if sys.platform != "win32":
@@ -112,10 +113,11 @@ def _assert_extras_dir_owned_correctly(install_salt):
         ), f"Expected {path} to be owned by {ALT_USER}, got {path.owner()}"
 
 
-def _is_deb(install_salt):
-    return install_salt.distro_id in ("ubuntu", "debian")
-
-
+# Skip before fixture setup: these fixtures install and remove real packages.
+@pytest.mark.skipif(
+    distro.id().lower() not in ("ubuntu", "debian"),
+    reason="Environment overrides are tested only with Debian/Ubuntu packages",
+)
 def test_env_var_overrides(install_salt_env):
     """
     Export SALT_USER / SALT_GROUP / SALT_HOME / SALT_EXTRAS_DIR in the
@@ -129,17 +131,14 @@ def test_env_var_overrides(install_salt_env):
     scripts. The file-based override (test_rpm_sysconfig_file_override)
     covers the equivalent functionality for RPM.
     """
-    if not _is_deb(install_salt_env):
-        pytest.skip(
-            "RPM scriptlets do not inherit env vars from yum/dnf; "
-            "the /etc/sysconfig/salt-minion-setup file is the RPM "
-            "override channel and is covered by "
-            "test_rpm_sysconfig_file_override"
-        )
     _assert_alt_salt_passwd(home_should_be=ALT_HOME)
     _assert_extras_dir_owned_correctly(install_salt_env)
 
 
+@pytest.mark.skipif(
+    distro.id().lower() not in ("ubuntu", "debian"),
+    reason="/etc/default/salt-setup is the DEB-side override convention",
+)
 def test_deb_default_file_override(install_salt_deb_file):
     """
     Pre-create /etc/default/salt-setup with the alt_salt overrides.
@@ -150,8 +149,6 @@ def test_deb_default_file_override(install_salt_deb_file):
     On RPM, the equivalent test_rpm_sysconfig_file_override case
     covers the parallel mechanism.
     """
-    if not _is_deb(install_salt_deb_file):
-        pytest.skip("/etc/default/salt-setup is the DEB-side override convention")
     _assert_alt_salt_passwd(home_should_be=ALT_HOME)
     _assert_extras_dir_owned_correctly(install_salt_deb_file)
 
