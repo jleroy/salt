@@ -38,10 +38,12 @@ pytestmark = [
 
 
 def _read(path):
-    if not pathlib.Path(path).exists():
+    try:
+        with salt.utils.files.fopen(path, "rb") as fp:
+            return fp.read()
+    except FileNotFoundError:
+        # Join-reply handling unlinks the old key before writing its replacement.
         return None
-    with salt.utils.files.fopen(path, "rb") as fp:
-        return fp.read()
 
 
 def test_isolated_cluster_aes_converges(
@@ -234,19 +236,25 @@ def test_isolated_cluster_pem_propagates(
         cluster_master_2_isolated,
         cluster_master_3_isolated,
     ]
-    pems = []
-    pubs = []
-    for m in masters:
-        pki = pathlib.Path(m.config["cluster_pki_dir"])
-        pems.append(_read(pki / "cluster.pem"))
-        pubs.append(_read(pki / "cluster.pub"))
-    assert all(v is not None for v in pems), (
-        f"Some masters missing cluster.pem: "
-        f"{[m.config['interface'] for m, v in zip(masters, pems) if v is None]}"
+    # Startup does not wait for join-reply to replace each joiner's local keys.
+    # Wait for both files to converge, including transient missing or empty files.
+    pki_dirs = [pathlib.Path(m.config["cluster_pki_dir"]) for m in masters]
+    pems = pubs = [None] * len(masters)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        pems = [_read(pki / "cluster.pem") for pki in pki_dirs]
+        pubs = [_read(pki / "cluster.pub") for pki in pki_dirs]
+        if all(pems) and all(pubs) and len(set(pems)) == len(set(pubs)) == 1:
+            break
+        time.sleep(0.5)
+
+    assert all(pems), (
+        f"Some masters have missing or empty cluster.pem: "
+        f"{[m.config['interface'] for m, v in zip(masters, pems) if not v]}"
     )
-    assert all(v is not None for v in pubs), (
-        f"Some masters missing cluster.pub: "
-        f"{[m.config['interface'] for m, v in zip(masters, pubs) if v is None]}"
+    assert all(pubs), (
+        f"Some masters have missing or empty cluster.pub: "
+        f"{[m.config['interface'] for m, v in zip(masters, pubs) if not v]}"
     )
     assert len(set(pems)) == 1, "cluster.pem differs between masters"
     assert len(set(pubs)) == 1, "cluster.pub differs between masters"
