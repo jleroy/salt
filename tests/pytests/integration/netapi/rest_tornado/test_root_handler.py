@@ -228,13 +228,20 @@ async def test_simple_local_async_post_no_tgt(http_client):
 
 
 # runner tests
-# ``manage.up`` broadcasts a ping and waits out the full 30 s
-# ``gather_job_timeout`` (set in conftest), which collides with the default
-# 30 s async budget the harness wraps async tests in. Give it room to finish.
+# Allow the runner's explicit ping and collection timeouts to finish within
+# the test's async budget, including subprocess startup on spawning platforms.
 @pytest.mark.slow_test
 @pytest.mark.async_timeout(seconds=120)
 async def test_simple_local_runner_post(http_client, salt_minion, salt_sub_minion):
-    low = [{"client": "runner", "fun": "manage.up"}]
+    # The runner executes on the master, so the API fixture's local
+    # gather_job_timeout override does not apply. Pass the budgets explicitly.
+    low = [
+        {
+            "client": "runner",
+            "fun": "manage.up",
+            "kwarg": {"timeout": 30, "gather_job_timeout": 30},
+        }
+    ]
     response = await http_client.fetch(
         "/",
         method="POST",
