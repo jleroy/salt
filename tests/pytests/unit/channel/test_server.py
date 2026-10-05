@@ -1352,12 +1352,14 @@ async def test_join_reply_refreshes_master_keys_cache_70090(tmp_path, key_data):
     cluster_pki = tmp_path / "cluster_pki"
     cluster_pki.mkdir()
     # Simulate the joiner's placeholder that ``_setup_keys`` wrote on
-    # startup -- the join-reply handler unlinks and rewrites these.
+    # startup -- the join-reply handler replaces these atomically.
     (cluster_pki / "cluster.pem").write_bytes(b"PLACEHOLDER-PEM")
     (cluster_pki / "cluster.pub").write_text("PLACEHOLDER-PUB")
 
     opts = {
         "id": "joiner_master",
+        "cachedir": str(tmp_path),
+        "publish_signing_algorithm": "PKCS1v15-SHA1",
         "cluster_id": "master_cluster",
         "cluster_peers": ["founder"],
         "cluster_pki_dir": str(cluster_pki),
@@ -1369,6 +1371,8 @@ async def test_join_reply_refreshes_master_keys_cache_70090(tmp_path, key_data):
     channel = server.MasterPubServerChannel.__new__(server.MasterPubServerChannel)
     channel.opts = opts
     channel._discover_token = b"test-token-0000000000000000000000"
+    channel._init_join_state()
+    channel._pending_join = ("founder", "join-token", "founder-public-key")
     channel._discover_event = None
     channel._raft_dispatcher = None
     channel._raft_service = None
@@ -1389,33 +1393,28 @@ async def test_join_reply_refreshes_master_keys_cache_70090(tmp_path, key_data):
     fake_master_key.cache = MagicMock()
     channel.master_key = fake_master_key
 
-    # Stub the RSA decrypt of ``cluster_key_session``: return
-    # ``discover_token + Crypticle key`` so the handler decodes cleanly.
-    session_key = salt.crypt.Crypticle.generate_key_string()
-    salted_session_bytes = channel._discover_token + session_key.encode()
-
-    # Stub Crypticle.decrypt to return our wire-delivered PEM regardless
-    # of ciphertext, and the RSA private key load to return an object
-    # whose .decrypt returns salted_session_bytes.
-    fake_private_key = MagicMock()
-    fake_private_key.decrypt.return_value = salted_session_bytes
-    fake_crypticle = MagicMock()
-    fake_crypticle.decrypt.return_value = delivered_pem
-
-    # Stub PrivateKey.from_str so the rebind at the end of the fix
-    # returns a sentinel we can identify.  ``salt.crypt.PrivateKey``
-    # normally parses the PEM; here we just verify it was called with
-    # the wire-delivered bytes and its return value bound onto master_key.
+    # Identity validation has separate coverage with real keys. Here we
+    # verify that the validated identity updates the cache and in-memory key.
     reloaded_key_sentinel = object()
+    channel._validate_join_identity = MagicMock(
+        return_value=(
+            b"cluster-aes",
+            delivered_pem,
+            delivered_pub,
+            reloaded_key_sentinel,
+        )
+    )
 
-    with patch("salt.crypt.PrivateKey.from_file", return_value=fake_private_key), patch(
-        "salt.crypt.Crypticle", return_value=fake_crypticle
-    ), patch("salt.crypt.PrivateKey.from_str", return_value=reloaded_key_sentinel):
+    with patch("salt.crypt.PublicKeyString"), patch.dict(
+        SMaster.secrets, {"cluster_aes": {"secret": MagicMock()}}
+    ):
         # Inner payload has cluster_key_session + cluster_pem +
         # cluster_pub -- exactly what the founder's join handler
         # sends under isolated-FS.
         inner_payload = {
             "peer_id": "founder",
+            "return_token": "join-token",
+            "cluster_aes": b"encrypted-aes",
             "cluster_key_session": b"encrypted-session-key",
             "cluster_pem": b"encrypted-pem",
             "cluster_pub": delivered_pub,

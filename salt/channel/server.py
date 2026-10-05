@@ -37,6 +37,7 @@ import salt.payload
 import salt.transport
 import salt.transport.frame
 import salt.transport.tcp
+import salt.utils.atomicfile
 import salt.utils.channel
 import salt.utils.event
 import salt.utils.metrics
@@ -1767,6 +1768,61 @@ class MasterPubServerChannel:
         self._discover_candidates = {}
         # Set by service.py once the Raft node is started.
         self._raft_dispatcher = None
+        self._init_join_state()
+
+    def _init_join_state(self):
+        self._cluster_identity_ready = self._has_joined_cluster()
+        self._pending_join = None
+        self._join_timeout_handle = None
+        self._deferred_discovery = {}
+        self._join_alternatives = {}
+        self._discovery_requests = {}
+
+    def _clear_pending_join(self):
+        if self._join_timeout_handle is not None:
+            self._join_timeout_handle.cancel()
+            self._join_timeout_handle = None
+        self._pending_join = None
+
+    def _retry_cluster_join(self):
+        self._clear_pending_join()
+        if self._cluster_identity_ready:
+            return
+        if self._join_alternatives:
+            peer = next(iter(self._join_alternatives))
+            payload = self._join_alternatives.pop(peer)
+            asyncio.create_task(self.handle_pool_publish(payload))
+        else:
+            self.discover_peers()
+
+    def _validate_join_identity(self, inner, token):
+        """Validate the complete identity before replacing any local keys."""
+        private_key = salt.crypt.PrivateKey.from_file(self.master_key.master_rsa_path)
+
+        def unwrap(field):
+            salted = private_key.decrypt(
+                inner[field], algorithm=self.opts["cluster_encryption_algorithm"]
+            )
+            if not salted.startswith(token):
+                raise salt.exceptions.AuthenticationError("Cluster join token mismatch")
+            return salted[len(token) :]
+
+        aes = unwrap("cluster_aes")
+        salt.crypt.Crypticle(self.opts, aes.decode())
+        session = salt.crypt.Crypticle(
+            self.opts, unwrap("cluster_key_session").decode()
+        )
+        pem = session.decrypt(inner["cluster_pem"])
+        pub = salt.utils.stringutils.to_unicode(inner["cluster_pub"])
+        key = salt.crypt.PrivateKey.from_str(pem)
+        public_key = salt.crypt.PublicKeyString(pub)
+        if key.public_key().public_numbers() != public_key.key.public_numbers():
+            raise salt.exceptions.AuthenticationError("Cluster RSA key pair mismatch")
+        if not cluster_pub_matches_fingerprint(self.opts, pub):
+            raise salt.exceptions.AuthenticationError(
+                "Cluster public key fingerprint mismatch"
+            )
+        return aes, pem, pub, key
 
     def _start_raft_as_founding_voter(self):
         """
@@ -2893,6 +2949,14 @@ class MasterPubServerChannel:
             sentinel.touch()
         except OSError as exc:
             log.warning("Could not write cluster join sentinel %s: %s", sentinel, exc)
+        self._cluster_identity_ready = True
+        self._clear_pending_join()
+        self._join_alternatives.clear()
+        # A joining peer must not advertise its provisional cluster identity.
+        pending = list(self._deferred_discovery.values())
+        self._deferred_discovery.clear()
+        for payload in pending:
+            asyncio.create_task(self.handle_pool_publish(payload))
 
     def discover_peers(self):
         """
@@ -2999,8 +3063,10 @@ class MasterPubServerChannel:
         self._discover_candidates = {}
         self._raft_dispatcher = None
         self._raft_service = None
+        self._init_join_state()
 
     def close(self):
+        self._clear_pending_join()
         self.transport.close()
 
     def pre_fork(self, process_manager, *args, **kwargs):
@@ -3476,37 +3542,47 @@ class MasterPubServerChannel:
             elif tag.startswith("cluster/peer/join-reply"):
                 # The join-reply carries a signed, packed inner payload.
                 inner = salt.payload.loads(data["payload"])
+                pending = self._pending_join
+                if self._cluster_identity_ready or pending is None:
+                    log.debug("Ignoring unsolicited or late cluster join reply")
+                    return
+                peer, join_token, peer_pub = pending
+                if (
+                    inner.get("peer_id") != peer
+                    or inner.get("return_token") != join_token
+                ):
+                    log.warning(
+                        "Cluster join reply does not match the active negotiation"
+                    )
+                    return
+                if not salt.crypt.PublicKeyString(peer_pub).verify(
+                    data["payload"],
+                    data["sig"],
+                    algorithm=self.opts["publish_signing_algorithm"],
+                ):
+                    log.warning("Cluster join reply signature invalid")
+                    return
+                token = salt.utils.stringutils.to_bytes(join_token)
+                try:
+                    new_cluster_aes, pem_bytes, pub_pem, cluster_key = (
+                        self._validate_join_identity(inner, token)
+                    )
+                except Exception:  # pylint: disable=broad-except
+                    log.exception("Invalid cluster identity in join-reply")
+                    return
                 log.info("Cluster join reply from %s", inner.get("peer_id", "unknown"))
-                # ``cluster_aes`` (the cluster's shared session AES key) is
-                # encrypted to our master pub here so a joiner without access
-                # to a shared ``cluster_pki_dir/.aes`` can adopt the cluster
-                # session.  ``cluster.pem`` (cluster RSA private) is still
-                # expected to be present locally — wire delivery for it is
-                # tracked separately.
-                token = self._discover_token or ""
-                if isinstance(token, str):
-                    token = token.encode()
+                # The complete identity has been authenticated and decrypted.
+                # Publish it in memory only after the files and cache are written.
                 if "cluster_aes" in inner:
                     try:
-                        salted = salt.crypt.PrivateKey.from_file(
-                            self.master_key.master_rsa_path
-                        ).decrypt(
-                            inner["cluster_aes"],
-                            algorithm=self.opts["cluster_encryption_algorithm"],
-                        )
-                        new_cluster_aes = salted[len(token) :]
-                        with salt.master.SMaster.secrets["cluster_aes"][
-                            "secret"
-                        ].get_lock():
-                            salt.master.SMaster.secrets["cluster_aes"][
-                                "secret"
-                            ].value = new_cluster_aes
                         # Persist locally so the joiner survives restart
                         # without re-running the join handshake.
                         aes_path = pathlib.Path(self.opts["cluster_pki_dir"]) / ".aes"
                         aes_path.parent.mkdir(parents=True, exist_ok=True)
                         with salt.utils.files.set_umask(0o177):
-                            with salt.utils.files.fopen(aes_path, "wb") as fp:
+                            with salt.utils.atomicfile.atomic_open(
+                                aes_path, "wb"
+                            ) as fp:
                                 fp.write(new_cluster_aes)
                         log.info(
                             "Installed cluster_aes from join-reply (%d bytes)",
@@ -3514,42 +3590,24 @@ class MasterPubServerChannel:
                         )
                     except Exception:  # pylint: disable=broad-except
                         log.exception("Failed to install cluster_aes from join-reply")
+                        return
                 # Install the cluster RSA key pair (private + public) from
                 # the wire so a joiner without shared ``cluster_pki_dir``
                 # can sign cluster events and serve discover-reply.
                 if "cluster_key_session" in inner and "cluster_pem" in inner:
                     try:
-                        salted_session = salt.crypt.PrivateKey.from_file(
-                            self.master_key.master_rsa_path
-                        ).decrypt(
-                            inner["cluster_key_session"],
-                            algorithm=self.opts["cluster_encryption_algorithm"],
-                        )
-                        session_key_str = salted_session[len(token) :].decode()
-                        cluster_key_crypt = salt.crypt.Crypticle(
-                            self.opts, session_key_str
-                        )
-                        pem_bytes = cluster_key_crypt.decrypt(inner["cluster_pem"])
-                        pub_pem = inner.get("cluster_pub") or ""
-                        if isinstance(pub_pem, bytes):
-                            pub_pem = pub_pem.decode()
                         cluster_pki = pathlib.Path(self.opts["cluster_pki_dir"])
                         cluster_pki.mkdir(parents=True, exist_ok=True)
-                        # ``find_or_create_keys`` may have already written a
-                        # locally-generated cluster.pem at mode 0400; unlink
-                        # before writing so the wire-delivered version wins.
+                        # Atomic replacement also handles the initial read-only key.
                         pem_path = cluster_pki / "cluster.pem"
                         pub_path = cluster_pki / "cluster.pub"
-                        for p in (pem_path, pub_path):
-                            try:
-                                p.unlink()
-                            except FileNotFoundError:
-                                pass
                         with salt.utils.files.set_umask(0o277):
-                            with salt.utils.files.fopen(pem_path, "wb") as fp:
+                            with salt.utils.atomicfile.atomic_open(
+                                pem_path, "wb"
+                            ) as fp:
                                 fp.write(pem_bytes)
                         if pub_pem:
-                            with salt.utils.files.fopen(pub_path, "w") as fp:
+                            with salt.utils.atomicfile.atomic_open(pub_path, "w") as fp:
                                 fp.write(pub_pem)
                         # Refresh the key cache so subsequent
                         # ``MasterKeys.get_pub_str()`` / ``find_or_create_keys``
@@ -3577,19 +3635,12 @@ class MasterPubServerChannel:
                                 "Failed to refresh cluster keypair in cache "
                                 "after join-reply install"
                             )
+                            return
                         # Reload the in-memory PrivateKey so the running
                         # master process signs and decrypts with the shared
                         # cluster identity from this event onward.
-                        try:
-                            self.master_key.cluster_key = (
-                                salt.crypt.PrivateKey.from_str(pem_bytes)
-                            )
-                            self.master_key.key = self.master_key.cluster_key
-                        except Exception:  # pylint: disable=broad-except
-                            log.exception(
-                                "Failed to reload cluster_key from "
-                                "join-reply-delivered PEM"
-                            )
+                        self.master_key.cluster_key = cluster_key
+                        self.master_key.key = cluster_key
                         log.info(
                             "Installed cluster.pem (%d bytes) and cluster.pub from join-reply",
                             len(pem_bytes),
@@ -3598,6 +3649,11 @@ class MasterPubServerChannel:
                         log.exception(
                             "Failed to install cluster RSA key pair from join-reply"
                         )
+                        return
+                with salt.master.SMaster.secrets["cluster_aes"]["secret"].get_lock():
+                    salt.master.SMaster.secrets["cluster_aes"][
+                        "secret"
+                    ].value = new_cluster_aes
                 event = self._discover_event
                 self._discover_event = None
                 # Write the join sentinel so future restarts skip discover/join.
@@ -3623,7 +3679,11 @@ class MasterPubServerChannel:
                     if event is not None:
                         event.set()
             elif tag.startswith("cluster/peer/join"):
-
+                if not self._cluster_identity_ready:
+                    log.debug(
+                        "Deferring cluster join until our identity is established"
+                    )
+                    return
                 payload = salt.payload.loads(data["payload"])
 
                 pub, token = self._discover_candidates[payload["peer_id"]]
@@ -3830,6 +3890,8 @@ class MasterPubServerChannel:
                         )
                     )
             elif tag.startswith("cluster/peer/discover-reply"):
+                if self._cluster_identity_ready:
+                    return
                 payload = salt.payload.loads(data["payload"])
 
                 if not cluster_pub_matches_fingerprint(
@@ -3859,8 +3921,23 @@ class MasterPubServerChannel:
                 #    return
 
                 log.info("Cluster discover reply from %s", payload["peer_id"])
+                if self._pending_join is not None:
+                    if payload["peer_id"] != self._pending_join[0]:
+                        self._join_alternatives[payload["peer_id"]] = (
+                            salt.utils.event.SaltEvent.pack(tag, data)
+                        )
+                    return
                 key = salt.crypt.PublicKeyString(payload["pub"])
                 self._discover_token = self.gen_token()
+                self._pending_join = (
+                    payload["peer_id"],
+                    self._discover_token,
+                    payload["pub"],
+                )
+                self._join_timeout_handle = asyncio.get_running_loop().call_later(
+                    max(30, self.opts.get("cluster_join_timeout", 5)),
+                    self._retry_cluster_join,
+                )
                 tosign = salt.payload.package(
                     {
                         "return_token": payload["token"],
@@ -3928,8 +4005,19 @@ class MasterPubServerChannel:
                 ):
                     log.warning("Invalid signature of cluster discover payload")
                     return
+                if not self._cluster_identity_ready:
+                    self._deferred_discovery[payload["peer_id"]] = (
+                        salt.utils.event.SaltEvent.pack(tag, data)
+                    )
+                    return
                 log.info("Cluster discovery from %s", payload["peer_id"])
-                token = self.gen_token()
+                peer = payload["peer_id"]
+                request = (payload["pub"], payload["token"])
+                if self._discovery_requests.get(peer) == request:
+                    _, token = self._discover_candidates[peer]
+                else:
+                    token = self.gen_token()
+                    self._discovery_requests[peer] = request
                 # Store this peer as a candidate.
                 # XXX Add timestamp so we can clean up old candidates
                 self._discover_candidates[payload["peer_id"]] = (payload["pub"], token)
