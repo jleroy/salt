@@ -1772,28 +1772,24 @@ class MasterPubServerChannel:
 
     def _init_join_state(self):
         self._cluster_identity_ready = self._has_joined_cluster()
-        self._pending_join = None
-        self._join_timeout_handle = None
+        self._pending_joins = {}
+        self._join_timeout_handles = {}
+        self._joined_peers = set()
         self._deferred_discovery = {}
-        self._join_alternatives = {}
         self._discovery_requests = {}
 
-    def _clear_pending_join(self):
-        if self._join_timeout_handle is not None:
-            self._join_timeout_handle.cancel()
-            self._join_timeout_handle = None
-        self._pending_join = None
+    def _clear_pending_join(self, peer=None):
+        peers = list(self._pending_joins) if peer is None else [peer]
+        for candidate in peers:
+            handle = self._join_timeout_handles.pop(candidate, None)
+            if handle is not None:
+                handle.cancel()
+            self._pending_joins.pop(candidate, None)
 
-    def _retry_cluster_join(self):
-        self._clear_pending_join()
-        if self._cluster_identity_ready:
-            return
-        if self._join_alternatives:
-            peer = next(iter(self._join_alternatives))
-            payload = self._join_alternatives.pop(peer)
-            asyncio.create_task(self.handle_pool_publish(payload))
-        else:
-            self.discover_peers()
+    def _retry_cluster_join(self, peer):
+        self._clear_pending_join(peer)
+        # Rediscovery also retries missing peers after our identity is established.
+        self.discover_peers()
 
     def _validate_join_identity(self, inner, token):
         """Validate the complete identity before replacing any local keys."""
@@ -2950,8 +2946,6 @@ class MasterPubServerChannel:
         except OSError as exc:
             log.warning("Could not write cluster join sentinel %s: %s", sentinel, exc)
         self._cluster_identity_ready = True
-        self._clear_pending_join()
-        self._join_alternatives.clear()
         # A joining peer must not advertise its provisional cluster identity.
         pending = list(self._deferred_discovery.values())
         self._deferred_discovery.clear()
@@ -3542,15 +3536,13 @@ class MasterPubServerChannel:
             elif tag.startswith("cluster/peer/join-reply"):
                 # The join-reply carries a signed, packed inner payload.
                 inner = salt.payload.loads(data["payload"])
-                pending = self._pending_join
-                if self._cluster_identity_ready or pending is None:
+                peer = inner.get("peer_id")
+                pending = self._pending_joins.get(peer)
+                if pending is None:
                     log.debug("Ignoring unsolicited or late cluster join reply")
                     return
-                peer, join_token, peer_pub = pending
-                if (
-                    inner.get("peer_id") != peer
-                    or inner.get("return_token") != join_token
-                ):
+                join_token, peer_pub = pending
+                if inner.get("return_token") != join_token:
                     log.warning(
                         "Cluster join reply does not match the active negotiation"
                     )
@@ -3569,6 +3561,26 @@ class MasterPubServerChannel:
                     )
                 except Exception:  # pylint: disable=broad-except
                     log.exception("Invalid cluster identity in join-reply")
+                    return
+                if self._cluster_identity_ready:
+                    # Other peers may hold additional data, but must never replace
+                    # the cluster identity adopted from the first valid reply.
+                    if (
+                        new_cluster_aes
+                        != salt.master.SMaster.secrets["cluster_aes"]["secret"].value
+                        or pub_pem.strip() != self.cluster_public_key().strip()
+                    ):
+                        log.warning("Cluster identity mismatch from peer %s", peer)
+                        return
+                    log.info("Cluster peer %s authenticated for additional sync", peer)
+                    self._clear_pending_join(peer)
+                    self._joined_peers.add(peer)
+                    session_id = inner.get("state_sync_session")
+                    if session_id and self.opts.get("cluster_isolated_filesystem"):
+                        self._begin_root_sync_session(
+                            session_id,
+                            ["keys", "denied_keys", "file_roots", "pillar_roots"],
+                        )
                     return
                 log.info("Cluster join reply from %s", inner.get("peer_id", "unknown"))
                 # The complete identity has been authenticated and decrypted.
@@ -3657,6 +3669,8 @@ class MasterPubServerChannel:
                 event = self._discover_event
                 self._discover_event = None
                 # Write the join sentinel so future restarts skip discover/join.
+                self._clear_pending_join(peer)
+                self._joined_peers.add(peer)
                 self._mark_joined_cluster()
                 # Paged bulk state-sync: the join-reply names a session id
                 # and the responder follows up with chunked
@@ -3890,8 +3904,6 @@ class MasterPubServerChannel:
                         )
                     )
             elif tag.startswith("cluster/peer/discover-reply"):
-                if self._cluster_identity_ready:
-                    return
                 payload = salt.payload.loads(data["payload"])
 
                 if not cluster_pub_matches_fingerprint(
@@ -3921,27 +3933,23 @@ class MasterPubServerChannel:
                 #    return
 
                 log.info("Cluster discover reply from %s", payload["peer_id"])
-                if self._pending_join is not None:
-                    if payload["peer_id"] != self._pending_join[0]:
-                        self._join_alternatives[payload["peer_id"]] = (
-                            salt.utils.event.SaltEvent.pack(tag, data)
-                        )
+                peer = payload["peer_id"]
+                if peer in self._pending_joins or peer in self._joined_peers:
                     return
                 key = salt.crypt.PublicKeyString(payload["pub"])
-                self._discover_token = self.gen_token()
-                self._pending_join = (
-                    payload["peer_id"],
-                    self._discover_token,
-                    payload["pub"],
-                )
-                self._join_timeout_handle = asyncio.get_running_loop().call_later(
+                join_token = self.gen_token()
+                self._pending_joins[peer] = (join_token, payload["pub"])
+                self._join_timeout_handles[
+                    peer
+                ] = asyncio.get_running_loop().call_later(
                     max(30, self.opts.get("cluster_join_timeout", 5)),
                     self._retry_cluster_join,
+                    peer,
                 )
                 tosign = salt.payload.package(
                     {
                         "return_token": payload["token"],
-                        "token": self._discover_token,
+                        "token": join_token,
                         "peer_id": self.opts["id"],
                         "secret": key.encrypt(
                             payload["token"].encode()

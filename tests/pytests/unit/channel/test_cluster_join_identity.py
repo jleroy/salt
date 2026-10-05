@@ -127,6 +127,9 @@ def join_reply(sender, receiver, token, **overrides):
 
 
 async def test_unjoined_master_defers_discovery(masters):
+    """
+    Defer discovery replies until this master has an established cluster identity.
+    """
     second, third = masters["second"], masters["third"]
     request = discovery(second)
     await deliver(third, request)
@@ -138,7 +141,10 @@ async def test_unjoined_master_defers_discovery(masters):
     assert not third._deferred_discovery
 
 
-async def test_concurrent_discovery_uses_one_negotiation(masters):
+async def test_concurrent_discovery_uses_independent_negotiations(masters):
+    """
+    Keep a separate pending negotiation and token for each responding peer.
+    """
     founder, second, third = (masters[k] for k in ("founder", "second", "third"))
     for sender in (founder, third):
         response = signed_event(
@@ -153,17 +159,15 @@ async def test_concurrent_discovery_uses_one_negotiation(masters):
             cluster_key=True,
         )
         await deliver(second, response)
-    assert second._pending_join[0] == "founder"
-    assert set(second._join_alternatives) == {"third"}
-    assert second.pusher.call_count == 1
-    with patch.dict(salt.master.SMaster.secrets, second.test_secrets):
-        second._retry_cluster_join()
-        await asyncio.sleep(0)
-    assert second._pending_join[0] == "third"
+    assert set(second._pending_joins) == {"founder", "third"}
+    assert second._pending_joins["founder"][0] != second._pending_joins["third"][0]
     assert second.pusher.call_count == 2
 
 
 async def test_unjoined_master_does_not_distribute_keys(masters):
+    """
+    Do not distribute provisional keys before joining the cluster.
+    """
     second, third = masters["second"], masters["third"]
     await deliver(third, signed_event(second, "cluster/peer/join", {}))
     third.pusher.assert_not_called()
@@ -171,6 +175,9 @@ async def test_unjoined_master_does_not_distribute_keys(masters):
 
 
 async def test_duplicate_discovery_preserves_join_challenge(masters):
+    """
+    Reuse the challenge for duplicate discovery requests so pending joins remain valid.
+    """
     founder, second = masters["founder"], masters["second"]
     request = discovery(second)
     await deliver(founder, request)
@@ -180,6 +187,9 @@ async def test_duplicate_discovery_preserves_join_challenge(masters):
 
 
 async def test_discovery_and_join_adopt_founder_identity(masters):
+    """
+    Complete discovery and join, adopt the founder's keys, and clear the negotiation.
+    """
     founder, second = masters["founder"], masters["second"]
     founder_pusher = MagicMock(pull_host="second", publish=AsyncMock())
     second_pusher = MagicMock(pull_host="founder", publish=AsyncMock())
@@ -190,8 +200,8 @@ async def test_discovery_and_join_adopt_founder_identity(masters):
     await deliver(founder, second_pusher.publish.call_args.args[0])
     await deliver(second, founder_pusher.publish.call_args.args[0])
     assert second._cluster_identity_ready
-    assert second._pending_join is None
-    assert second._join_timeout_handle is None
+    assert not second._pending_joins
+    assert not second._join_timeout_handles
     assert second.cluster_key() == founder.cluster_key()
     assert (
         second.test_secrets["cluster_aes"]["secret"].value
@@ -200,23 +210,29 @@ async def test_discovery_and_join_adopt_founder_identity(masters):
 
 
 async def test_failed_identity_install_does_not_complete_join(masters):
+    """
+    Leave the join incomplete and the in-memory AES key unchanged if persistence fails.
+    """
     founder, second = masters["founder"], masters["second"]
     original_aes = second.test_secrets["cluster_aes"]["secret"].value
-    second._pending_join = ("founder", "join-token", founder.public_key())
+    second._pending_joins["founder"] = ("join-token", founder.public_key())
     with patch("salt.utils.atomicfile.atomic_open", side_effect=OSError("Disk full")):
         await deliver(second, join_reply(founder, second, "join-token"))
     assert not second._cluster_identity_ready
     assert not second._has_joined_cluster()
-    assert second._pending_join is not None
+    assert second._pending_joins
     assert second.test_secrets["cluster_aes"]["secret"].value == original_aes
     second._start_raft_as_learner.assert_not_called()
 
 
 async def test_late_join_reply_cannot_replace_cluster_identity(masters, tmp_path):
+    """
+    Ignore an unsolicited stale reply and retain working encrypted file transfers.
+    """
     founder, second, third = (masters[k] for k in ("founder", "second", "third"))
     stale_reply = join_reply(third, second, "join-token")
     for receiver in (second, third):
-        receiver._pending_join = ("founder", "join-token", founder.public_key())
+        receiver._pending_joins["founder"] = ("join-token", founder.public_key())
         await deliver(receiver, join_reply(founder, receiver, "join-token"))
         assert receiver._cluster_identity_ready
     await deliver(second, stale_reply)
@@ -248,10 +264,13 @@ async def test_late_join_reply_cannot_replace_cluster_identity(masters, tmp_path
     "invalid", ["peer", "token", "signature", "key_pair", "wrapped_token"]
 )
 async def test_invalid_join_reply_does_not_change_identity(masters, invalid):
+    """
+    Reject invalid peer IDs, tokens, signatures, or key material before adopting identity.
+    """
     founder, second = masters["founder"], masters["second"]
     original_pem = second.cluster_key()
     original_aes = second.test_secrets["cluster_aes"]["secret"].value
-    second._pending_join = ("founder", "join-token", founder.public_key())
+    second._pending_joins["founder"] = ("join-token", founder.public_key())
     overrides = {}
     if invalid == "peer":
         overrides["peer_id"] = "other"
@@ -276,8 +295,109 @@ async def test_invalid_join_reply_does_not_change_identity(masters, invalid):
 
 
 async def test_join_timeout_without_alternative_restarts_discovery(masters):
+    """
+    Clear the expired negotiation and restart peer discovery.
+    """
     second = masters["second"]
-    second._pending_join = ("unavailable", "token", "pub")
-    second._retry_cluster_join()
-    assert second._pending_join is None
+    second._pending_joins["unavailable"] = ("token", "pub")
+    second._retry_cluster_join("unavailable")
+    assert not second._pending_joins
+    second.discover_peers.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    "invalid", [None, "token", "signature", "identity", "rsa_identity"]
+)
+async def test_additional_peer_sync_preserves_identity(masters, tmp_path, invalid):
+    """
+    Recover files and pillar from an additional peer without reinstalling cluster keys.
+
+    Reject invalid replies or incompatible AES/RSA identities without opening a
+    sync session. A valid reply permits encrypted transfers, ignores duplicates,
+    and does not start Raft a second time.
+    """
+    founder, second, third = (masters[k] for k in ("founder", "second", "third"))
+    # Join an empty peer first, then recover files held only by another peer.
+    for receiver in (second, third):
+        receiver._pending_joins["founder"] = ("initial", founder.public_key())
+        await deliver(receiver, join_reply(founder, receiver, "initial"))
+    third.opts["cluster_isolated_filesystem"] = True
+    second.opts["cluster_isolated_filesystem"] = True
+    (tmp_path / "second" / "files" / "test.sls").write_text("file marker")
+    (tmp_path / "second" / "pillar" / "top.sls").write_text("pillar marker")
+    # Exercise discovery after identity adoption, with its own signed challenge.
+    response = signed_event(
+        second,
+        "cluster/peer/discover-reply",
+        {
+            "peer_id": "second",
+            "pub": second.public_key(),
+            "cluster_pub": second.cluster_public_key(),
+            "token": "challenge",
+        },
+        cluster_key=True,
+    )
+    await deliver(third, response)
+    token = third._pending_joins["second"][0]
+    if invalid == "identity":
+        second.test_secrets["cluster_aes"][
+            "secret"
+        ].value = salt.crypt.Crypticle.generate_key_string().encode()
+    if invalid == "rsa_identity":
+        root = tmp_path / "second"
+        (root / "cluster.pem").write_bytes((root / "master.pem").read_bytes())
+        (root / "cluster.pub").write_bytes((root / "master.pub").read_bytes())
+    reply = join_reply(
+        second,
+        third,
+        "wrong" if invalid == "token" else token,
+        state_sync_session="additional",
+    )
+    if invalid == "signature":
+        tag, data = salt.utils.event.SaltEvent.unpack(reply)
+        data["sig"] = b"invalid"
+        reply = salt.utils.event.SaltEvent.pack(tag, data)
+    third.master_key.cache.store.reset_mock()
+    with patch("salt.utils.atomicfile.atomic_open") as atomic_open:
+        await deliver(third, reply)
+        atomic_open.assert_not_called()
+    third.master_key.cache.store.assert_not_called()
+    assert third.cluster_key() == founder.cluster_key()
+    assert (
+        third.test_secrets["cluster_aes"]["secret"].value
+        == founder.test_secrets["cluster_aes"]["secret"].value
+    )
+    third._start_raft_as_learner.assert_called_once()
+    if invalid:
+        assert "additional" not in getattr(third, "_state_sync_sessions", {})
+        return
+    session = third._state_sync_sessions["additional"]
+    await deliver(third, reply)
+    assert third._state_sync_sessions["additional"] is session
+    pusher = MagicMock(publish=AsyncMock())
+    second.pusher.side_effect = lambda peer: pusher
+    with patch.dict(salt.master.SMaster.secrets, second.test_secrets), patch(
+        "salt.cluster.state_sync.iter_keys_chunks", return_value=[]
+    ):
+        await second._send_state_sync_chunks("additional", "third")
+    for call in pusher.publish.call_args_list:
+        await deliver(third, call.args[0])
+    assert (tmp_path / "third" / "files" / "test.sls").read_text() == "file marker"
+    assert (tmp_path / "third" / "pillar" / "top.sls").read_text() == "pillar marker"
+    assert "additional" not in third._state_sync_sessions
+    third._start_raft_as_learner.assert_called_once()
+
+
+async def test_peer_timeout_preserves_other_negotiations(masters):
+    """
+    Retry an expired peer after identity adoption without clearing other negotiations.
+    """
+    second = masters["second"]
+    second._cluster_identity_ready = True
+    second._pending_joins = {"founder": ("one", "pub"), "third": ("two", "pub")}
+    handle = asyncio.get_running_loop().call_later(60, lambda: None)
+    second._join_timeout_handles["founder"] = handle
+    second._retry_cluster_join("founder")
+    assert handle.cancelled()
+    assert second._pending_joins == {"third": ("two", "pub")}
     second.discover_peers.assert_called_once_with()

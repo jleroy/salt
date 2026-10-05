@@ -1372,7 +1372,7 @@ async def test_join_reply_refreshes_master_keys_cache_70090(tmp_path, key_data):
     channel.opts = opts
     channel._discover_token = b"test-token-0000000000000000000000"
     channel._init_join_state()
-    channel._pending_join = ("founder", "join-token", "founder-public-key")
+    channel._pending_joins["founder"] = ("join-token", "founder-public-key")
     channel._discover_event = None
     channel._raft_dispatcher = None
     channel._raft_service = None
