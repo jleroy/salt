@@ -162,7 +162,7 @@ jobs:
 
   macos-dependencies:
     name: MacOS
-    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
+    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'xcode-27' }}
     if: ${{ toJSON(fromJSON(inputs.matrix)['macos']) != '[]' }}
     timeout-minutes: 90
     strategy:
