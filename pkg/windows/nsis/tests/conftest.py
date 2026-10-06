@@ -3,7 +3,6 @@ import re
 import shutil
 import stat
 import subprocess
-import tempfile
 import time
 import winreg
 
@@ -79,48 +78,8 @@ INST_DIR_WAIT_SECS = 30  # install dir to be deleted by Un.exe
 SCM_WAIT_SECS = 60
 
 
-def _dump_timeout_diagnostics(pid=None):
-    """Report service and process state before cleanup destroys the evidence."""
-    try:
-        result = subprocess.run(
-            ["sc.exe", "queryex", "salt-minion"],
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=10,
-        )
-        print(
-            f"\nService query (exit {result.returncode}):\n{result.stdout}{result.stderr}"
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"\nCould not query salt-minion service: {exc}")
-    processes = {}
-    try:
-        for process in psutil.process_iter():
-            try:
-                if process.pid == pid or process.name().lower() in {
-                    name.lower() for name in PROCESSES
-                } | {"ssm.exe", "nssm.exe", "salt-minion.exe"}:
-                    processes[process.pid] = process
-                    for child in process.children(recursive=True):
-                        processes[child.pid] = child
-            except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
-                print(f"Process {process.pid} unavailable: {exc}")
-        for process in processes.values():
-            try:
-                print(
-                    f"Process PID={process.pid} PPID={process.ppid()} "
-                    f"status={process.status()} command={process.cmdline()!r}"
-                )
-            except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
-                print(f"Process {process.pid} unavailable: {exc}")
-    except psutil.Error as exc:
-        print(f"Could not inspect processes: {exc}")
-
-
 def _kill_lingering_processes():
     """Force-kill any installer/uninstaller processes that are still running."""
-    _dump_timeout_diagnostics()
     for name in PROCESSES:
         subprocess.run(
             ["taskkill", "/F", "/T", "/IM", name],
@@ -316,7 +275,6 @@ def clean_env(inst_dir=INST_DIR):
                 scm_elapsed += 0.5
                 time.sleep(0.5)
             else:
-                _dump_timeout_diagnostics()
                 print(
                     f"\nWARNING: salt-minion service key still present after "
                     f"{SCM_WAIT_SECS}s — continuing anyway"
@@ -453,28 +411,30 @@ def run_command(cmd_args, timeout=60):
         elapsed_time += 0.1
         time.sleep(0.1)
 
-    # A regular file preserves output without waiting for EOF on a pipe that
-    # installer children may inherit. Wait only for the original process.
-    log_dir = os.path.join(SCRIPT_DIR, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        prefix="installer-", suffix=".log", dir=log_dir, delete=False
-    ) as output:
-        print(f"\nCommand: {cmd_args}\nOutput log: {output.name}")
-        proc = subprocess.Popen(cmd_args, stdout=output, stderr=subprocess.STDOUT)
-        try:
-            proc.wait(timeout=timeout)
-            if proc.returncode == 0:
-                return True
-            print(f"\nWARNING: process exited with code {proc.returncode}: {cmd_args}")
-            _dump_timeout_diagnostics(proc.pid)
-        except subprocess.TimeoutExpired:
-            print(f"\nWARNING: process timed out after {timeout}s: {cmd_args}")
-            _dump_timeout_diagnostics(proc.pid)
-            _kill_process_tree(proc)
-        # Bound console output; the complete file remains available as an artifact.
-        with open(output.name, "rb") as captured:
-            captured.seek(0, os.SEEK_END)
-            captured.seek(max(0, captured.tell() - 16384))
-            print(captured.read().decode(errors="replace"))
-    return False
+    # Use DEVNULL instead of PIPE for stdout/stderr.  PIPE creates inheritable
+    # handles: NSIS's Exec (bInheritHandles=TRUE) passes them to the
+    # "ssm.exe start salt-minion" child, which then holds the write-end of
+    # the pipe open even after the installer itself has exited.
+    # proc.communicate() can never see EOF while that child is alive, so the
+    # test blocks indefinitely.  DEVNULL avoids creating any pipe handles,
+    # so proc.wait() returns as soon as the installer process exits.
+    proc = subprocess.Popen(
+        cmd_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    try:
+        proc.wait(timeout=timeout)
+        if proc.returncode != 0:
+            print(
+                f"\nWARNING: process exited with code {proc.returncode}: {cmd_args[:120]}"
+            )
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        # Kill the installer/uninstaller and every child it spawned (nssm,
+        # salt-minion, etc.) so they don't linger into the next iteration.
+        print(
+            f"\nWARNING: process timed out after {timeout}s — force-killing: {cmd_args[:120]}"
+        )
+        _kill_process_tree(proc)
+        return False
