@@ -16,6 +16,7 @@ import pathlib
 import time
 
 import pytest
+from pytestshellutils.exceptions import FactoryTimeout
 
 import salt.cache
 import salt.utils.files
@@ -381,17 +382,25 @@ def _glob_ping_all(cli, expected_ids, deadline_secs=180):
     """
     deadline = time.monotonic() + deadline_secs
     last_ret = None
+    last_timeout = None
     expected = set(expected_ids)
     while time.monotonic() < deadline:
-        last_ret = cli.run("test.ping", minion_tgt="*")
-        data = last_ret.data or {}
-        if (
-            isinstance(data, dict)
-            and expected.issubset(data)
-            and all(data[mid] is True for mid in expected)
-        ):
-            return last_ret
+        try:
+            last_ret = cli.run("test.ping", minion_tgt="*")
+        except FactoryTimeout as exc:
+            # A late joiner's workers may still be starting when the CLI times out.
+            last_timeout = exc
+        else:
+            data = last_ret.data or {}
+            if (
+                isinstance(data, dict)
+                and expected.issubset(data)
+                and all(data[mid] is True for mid in expected)
+            ):
+                return last_ret
         time.sleep(2)
+    if last_ret is None and last_timeout is not None:
+        raise last_timeout
     return last_ret
 
 
