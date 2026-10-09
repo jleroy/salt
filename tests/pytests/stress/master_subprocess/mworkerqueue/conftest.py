@@ -55,16 +55,6 @@ def _free_tcp_port() -> int:
         return s.getsockname()[1]
 
 
-def _port_open(host: str, port: int, timeout: float = 0.2) -> bool:
-    """Return True if a TCP connection to ``host:port`` succeeds."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(timeout)
-        try:
-            return s.connect_ex((host, port)) == 0
-        except OSError:
-            return False
-
-
 def _build_opts(sock_dir: str, ret_port: int, worker_port: int) -> dict:
     """Minimal opts dict accepted by ``RequestServer.zmq_device``."""
     return {
@@ -91,16 +81,11 @@ def _build_opts(sock_dir: str, ret_port: int, worker_port: int) -> dict:
     }
 
 
-def _run_mworkerqueue(opts: dict) -> None:
+def _run_mworkerqueue(opts: dict, ready_event) -> None:
     """
     Subprocess entrypoint: spin up a RequestServer and run its zmq_device.
 
-    Readiness is signalled implicitly by both TCP ports being connectable
-    (the parent polls with ``socket.connect_ex``).  We avoid pipe-based
-    signalling because ``multiprocessing`` with ``spawn`` does not
-    guarantee that a raw fd passed via ``args`` remains valid in the
-    child (the fd number is not re-inherited across the exec that
-    ``spawn`` performs on some platforms).
+    Signal readiness after both sockets and the request router are initialized.
     """
     # Import inside the child so the parent doesn't pull half the master
     # stack (and its C extensions) until it has to.
@@ -108,7 +93,7 @@ def _run_mworkerqueue(opts: dict) -> None:
 
     server = _z.RequestServer(opts)
     try:
-        server.zmq_device()
+        server.zmq_device(ready_event=ready_event)
     except SystemExit:
         pass
     except KeyboardInterrupt:
@@ -206,24 +191,24 @@ def mworkerqueue(mwq_ctx, tmp_path):
 
     # ``spawn`` gives us a clean interpreter — no inherited zmq contexts.
     ctx_mp = multiprocessing.get_context("spawn")
+    ready_event = ctx_mp.Event()
     proc = ctx_mp.Process(
         target=_run_mworkerqueue,
-        args=(opts,),
+        args=(opts, ready_event),
         name="MWorkerQueue-stress",
         daemon=True,
     )
     proc.start()
 
-    # Wait until both ports accept TCP connections (up to 15s).
+    # Open TCP ports do not guarantee the router has finished initializing.
     deadline = time.monotonic() + 15.0
     ready = False
     while time.monotonic() < deadline:
         if not proc.is_alive():
             break
-        if _port_open("127.0.0.1", ret_port) and _port_open("127.0.0.1", worker_port):
+        if ready_event.wait(timeout=0.05):
             ready = True
             break
-        time.sleep(0.05)
 
     if not ready:
         if proc.is_alive():
