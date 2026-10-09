@@ -13,11 +13,16 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import padding
 
 import salt.utils.files
+import salt.utils.platform
 from tests.conftest import FIPS_TESTRUN
 
 pytestmark = [
     pytest.mark.core_test,
 ]
+
+# GitHub's macOS CI can be slow.
+if salt.utils.platform.is_darwin():
+    pytestmark.append(pytest.mark.timeout(180))
 
 
 async def test_ssl_publish_server(ssl_salt_master, ssl_salt_minion, io_loop):
