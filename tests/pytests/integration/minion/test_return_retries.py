@@ -130,7 +130,9 @@ def test_pillar_timeout(salt_master_factory, tmp_path):
         random_string("pillar-timeout-4-"),
         overrides=minion_overrides,
     )
-    cli = master.salt_cli()
+    # Allow time for worker startup and delivery of the expected pillar timeout
+    # error; the pillar request itself must still time out after 5 seconds.
+    cli = master.salt_cli(timeout=60)
     sls_tempfile = master.state_tree.base.temp_file(f"{sls_name}.sls", sls_contents)
     with master.started(), minion1.started(), minion2.started(), minion3.started(), minion4.started(), (
         sls_tempfile
