@@ -346,6 +346,8 @@ class GitModuleTest(ModuleCase):
         self.assertTrue(bool(commit_msg in ret))
 
     @pytest.mark.slow_test
+    # GitHub's macOS CI can be slow.
+    @pytest.mark.timeout(180 if salt.utils.platform.is_darwin() else 90)
     def test_config(self):
         """
         Test setting, getting, and unsetting config values
