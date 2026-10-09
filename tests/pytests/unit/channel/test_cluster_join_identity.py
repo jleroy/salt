@@ -10,6 +10,7 @@ import salt.crypt
 import salt.master
 import salt.payload
 import salt.utils.event
+from tests.conftest import FIPS_TESTRUN
 from tests.support.mock import AsyncMock, MagicMock, patch
 
 
@@ -38,8 +39,12 @@ def masters(tmp_path):
             "cluster_id": "test-cluster",
             "cluster_peers": [],
             "cluster_pool_port": 4520,
-            "cluster_encryption_algorithm": "OAEP-SHA1",
-            "publish_signing_algorithm": "PKCS1v15-SHA1",
+            "cluster_encryption_algorithm": (
+                "OAEP-SHA224" if FIPS_TESTRUN else "OAEP-SHA1"
+            ),
+            "publish_signing_algorithm": (
+                "PKCS1v15-SHA224" if FIPS_TESTRUN else "PKCS1v15-SHA1"
+            ),
             "file_roots": {"base": [str(root / "files")]},
             "pillar_roots": {"base": [str(root / "pillar")]},
         }
@@ -113,9 +118,13 @@ def join_reply(sender, receiver, token, **overrides):
         "peer_id": sender.opts["id"],
         "return_token": token,
         "cluster_aes": pub.encrypt(
-            token.encode() + sender.test_secrets["cluster_aes"]["secret"].value
+            token.encode() + sender.test_secrets["cluster_aes"]["secret"].value,
+            algorithm=sender.opts["cluster_encryption_algorithm"],
         ),
-        "cluster_key_session": pub.encrypt(token.encode() + session_key.encode()),
+        "cluster_key_session": pub.encrypt(
+            token.encode() + session_key.encode(),
+            algorithm=sender.opts["cluster_encryption_algorithm"],
+        ),
         "cluster_pem": salt.crypt.Crypticle(sender.opts, session_key).encrypt(
             sender.cluster_key().encode()
         ),
@@ -281,7 +290,10 @@ async def test_invalid_join_reply_does_not_change_identity(masters, invalid):
     elif invalid == "wrapped_token":
         overrides["cluster_aes"] = salt.crypt.PublicKeyString(
             second.public_key()
-        ).encrypt(b"wrong-token" + original_aes)
+        ).encrypt(
+            b"wrong-token" + original_aes,
+            algorithm=founder.opts["cluster_encryption_algorithm"],
+        )
     payload = join_reply(founder, second, "join-token", **overrides)
     if invalid == "signature":
         tag, data = salt.utils.event.SaltEvent.unpack(payload)
