@@ -2051,6 +2051,7 @@ async def test_connect_master_general_exception_error(minion_opts, connect_maste
     assert minion.connect_master.calls == 2
 
 
+@pytest.mark.no_blocking(threshold=0.1)
 async def test_minion_manager_async_stop(io_loop, minion_opts, socket_tmp_path):
     """
     Ensure MinionManager's stop method works correctly and calls the
