@@ -474,7 +474,7 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
         self.tasks = set()
         self._event = asyncio.Event()
 
-    def zmq_device(self, secrets=None):
+    def zmq_device(self, secrets=None, ready_event=None):
         """
         Multiprocessing target for the zmq queue device
         """
@@ -566,6 +566,10 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
         router = salt.master.RequestRouter(
             self.opts, secrets=secrets or getattr(self, "secrets", None)
         )
+
+        # Signal only after both sockets and the router are initialized.
+        if ready_event is not None:
+            ready_event.set()
 
         while True:
             if self.clients.closed or self.workers.closed:
@@ -820,9 +824,12 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
             )
         else:
             # Use standard routing device
+            device_kwargs = {"secrets": secrets}
+            if "ready_event" in kwargs:
+                device_kwargs["ready_event"] = kwargs["ready_event"]
             process_manager.add_process(
                 self.zmq_device,
-                kwargs={"secrets": secrets},
+                kwargs=device_kwargs,
                 name="MWorkerQueue",
             )
 

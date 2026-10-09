@@ -307,7 +307,8 @@ class MockSaltMinionMaster:
         master_opts = temp_salt_master.config.copy()
         master_opts.update({"transport": "zeromq", "worker_pools_enabled": False})
         self.server_channel = salt.channel.server.ReqServerChannel.factory(master_opts)
-        self.server_channel.pre_fork(self.process_manager)
+        self.relay_ready = multiprocessing.Event()
+        self.server_channel.pre_fork(self.process_manager, ready_event=self.relay_ready)
 
         self.io_loop = tornado.ioloop.IOLoop()
         self.evt = threading.Event()
@@ -329,7 +330,17 @@ class MockSaltMinionMaster:
 
     def __enter__(self):
         self.channel.__enter__()
-        self.evt.wait()
+        try:
+            assert self.evt.wait(
+                30
+            ), "Request server loop did not start within 30 seconds"
+            # Keep process startup outside the first request's response timeout.
+            assert self.relay_ready.wait(
+                30
+            ), "MWorkerQueue did not become ready within 30 seconds"
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
         return self
 
     def __exit__(self, *args, **kwargs):
