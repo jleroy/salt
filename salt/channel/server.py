@@ -1762,6 +1762,7 @@ class MasterPubServerChannel:
         self.io_loop = tornado.ioloop.IOLoop.current()
         self.master_key = salt.crypt.MasterKeys(self.opts)
         self.peer_keys = {}
+        self._aes_key_event_handle = None
         self.cluster_peers = self.opts["cluster_peers"]
         self._discover_event = None
         self._discover_token = None
@@ -2994,6 +2995,18 @@ class MasterPubServerChannel:
                 if not success:
                     log.error("Unable to send cluster discover event to %s", peer)
 
+    def _schedule_aes_key_event(self):
+        # Failed broadcasts can involve several peers; share one retry to avoid
+        # multiplying AES announcements while peers are still starting.
+        if self._aes_key_event_handle is None:
+            self._aes_key_event_handle = self.io_loop.call_later(
+                2.0, self._retry_aes_key_event
+            )
+
+    def _retry_aes_key_event(self):
+        self._aes_key_event_handle = None
+        self.send_aes_key_event()
+
     def send_aes_key_event(self):
         log.debug("Sending AES key event")
         # ``cluster_peers`` is documented to hold bare master names so the
@@ -3051,6 +3064,7 @@ class MasterPubServerChannel:
         self.io_loop = tornado.ioloop.IOLoop.current()
         self.master_key = salt.crypt.MasterKeys(self.opts)
         self.peer_keys = {}
+        self._aes_key_event_handle = None
         self.cluster_peers = self.opts["cluster_peers"]
         self._discover_event = None
         self._discover_token = None
@@ -3061,6 +3075,9 @@ class MasterPubServerChannel:
 
     def close(self):
         self._clear_pending_join()
+        if self._aes_key_event_handle is not None:
+            self.io_loop.remove_timeout(self._aes_key_event_handle)
+            self._aes_key_event_handle = None
         self.transport.close()
 
     def pre_fork(self, process_manager, *args, **kwargs):
@@ -4278,7 +4295,7 @@ class MasterPubServerChannel:
                             pusher.pub_sock = None
                     # Schedule an AES-key re-announcement so the peer
                     # learns our key after it reconnects.
-                    self.io_loop.call_later(2.0, self.send_aes_key_event)
+                    self._schedule_aes_key_event()
             except Exception as exc:  # pylint: disable=broad-except
                 log.error(
                     "Unhandled error sending task %s", task.get_name(), exc_info=True

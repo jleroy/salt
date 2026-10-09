@@ -1479,3 +1479,47 @@ async def test_join_reply_refreshes_master_keys_cache_70090(tmp_path, key_data):
         "cluster_key (mirrors the ``self.key = self.cluster_key`` line "
         "at the end of MasterKeys._setup_keys)."
     )
+
+
+async def test_failed_peer_broadcasts_share_aes_retry(master_opts):
+    """Keep repeated multi-peer failures from multiplying AES announcements."""
+    pushers = [MagicMock(pull_host=peer) for peer in ("peer-1", "peer-2")]
+    for pusher in pushers:
+        pusher.publish = AsyncMock(side_effect=OSError("Peer not ready"))
+    channel = _pub_channel(master_opts, pushers=pushers)
+    channel.io_loop = MagicMock()
+    channel._aes_key_event_handle = None
+    channel.send_aes_key_event = MagicMock()
+    load = salt.utils.event.SaltEvent.pack("cluster/peer/master", {})
+
+    await asyncio.gather(channel.publish_payload(load), channel.publish_payload(load))
+
+    channel.io_loop.call_later.assert_called_once_with(
+        2.0, channel._retry_aes_key_event
+    )
+    channel.send_aes_key_event.assert_not_called()
+    for pusher in pushers:
+        assert pusher.pub_sock is None
+        assert pusher.publish.await_count == 2
+
+    # After the pending announcement runs, subsequent failures may retry again.
+    channel._retry_aes_key_event()
+    channel.send_aes_key_event.assert_called_once_with()
+    await channel.publish_payload(load)
+    assert channel.io_loop.call_later.call_count == 2
+
+
+def test_master_pub_close_cancels_aes_retry(master_opts):
+    """Closing a channel must cancel its outstanding AES announcement."""
+    channel = _pub_channel(master_opts)
+    channel.io_loop = MagicMock()
+    channel._aes_key_event_handle = None
+    channel._clear_pending_join = MagicMock()
+    channel._schedule_aes_key_event()
+    handle = channel._aes_key_event_handle
+
+    channel.close()
+
+    channel.io_loop.remove_timeout.assert_called_once_with(handle)
+    assert channel._aes_key_event_handle is None
+    channel.transport.close.assert_called_once_with()
