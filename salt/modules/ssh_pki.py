@@ -738,10 +738,13 @@ def sign_remote_certificate(
 
 
 def _query_remote(ca_server, signing_policy, kwargs, get_signing_policy_only=False):
+    # Remote signing can exceed publish.publish's default 5-second timeout
+    # while the CA starts a worker and signs the certificate on a slow host.
     result = __salt__["publish.publish"](
         ca_server,
         "ssh_pki.sign_remote_certificate",
         arg=[signing_policy, kwargs, get_signing_policy_only],
+        timeout=60,
     )
 
     if not result:
