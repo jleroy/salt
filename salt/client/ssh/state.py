@@ -163,6 +163,14 @@ class SSHHighState(salt.state.BaseHighState):
         """
         Evaluate master_tops locally
         """
+        if getattr(self, "tops", None) is None:
+            opts = dict(self.opts)
+            master_opts = self.opts.get("__master_opts__", {})
+            if "extension_modules" in master_opts:
+                # Tops execute on the master, but self.opts contains the remote
+                # minion's extension path. Keep that path intact for SSH calls.
+                opts["extension_modules"] = master_opts["extension_modules"]
+            self.tops = salt.loader.tops(opts)
         return self._local_master_tops()
 
     def destroy(self):
