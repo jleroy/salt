@@ -636,7 +636,14 @@ def pytest_collection_modifyitems(config, items):
                 # is not already applied
                 # Default to counting only the test execution for the timeouts, ie,
                 # withough including the fixtures setup time towards the timeout.
-                item.add_marker(pytest.mark.timeout(90, func_only=True))
+                timeout = 90
+                # GitHub's macOS CI can be slow.
+                if salt.utils.platform.is_darwin() and any(
+                    pathlib.Path(item.fspath).resolve().is_relative_to(path)
+                    for path in (TESTS_DIR / "integration", PYTESTS_DIR / "integration")
+                ):
+                    timeout = 180
+                item.add_marker(pytest.mark.timeout(timeout, func_only=True))
 
 
 def pytest_markeval_namespace(config):
