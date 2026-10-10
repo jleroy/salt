@@ -5,6 +5,7 @@ import time
 import pytest
 
 import salt.cache
+import salt.utils.atomicfile
 from salt.exceptions import SaltCacheError
 from salt.utils.files import fopen
 
@@ -22,6 +23,35 @@ def cache(minion_opts):
         for minion in ["minion_a", "minion_x", "minion_y", "minion_z", "minion_denied"]:
             cache.flush("keys", minion)
             cache.flush("denied_keys", minion)
+
+
+@pytest.mark.parametrize("key", ["cluster.pem", "cluster.pub"])
+@pytest.mark.parametrize("fail_replace", [False, True])
+def test_master_key_remains_readable_during_replacement(
+    cache, monkeypatch, key, fail_replace
+):
+    """Readers must see the old key until replacement, even if the write fails."""
+    cache.store("master_keys", key, "original key")
+    atomic_rename = salt.utils.atomicfile.atomic_rename
+    observed = []
+
+    def replace(src, dst):
+        assert cache.contains("master_keys", key)
+        observed.append(cache.fetch("master_keys", key))
+        assert observed[-1] == "original key"
+        if fail_replace:
+            raise OSError("replacement failed")
+        atomic_rename(src, dst)
+
+    monkeypatch.setattr(salt.utils.atomicfile, "atomic_rename", replace)
+    if fail_replace:
+        with pytest.raises(SaltCacheError, match="replacement failed"):
+            cache.store("master_keys", key, "replacement key")
+        assert cache.fetch("master_keys", key) == "original key"
+    else:
+        cache.store("master_keys", key, "replacement key")
+        assert cache.fetch("master_keys", key) == "replacement key"
+    assert observed == ["original key"]
 
 
 # TODO: test user

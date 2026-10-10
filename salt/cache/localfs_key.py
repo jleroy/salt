@@ -140,8 +140,12 @@ def store(bank, key, data, cachedir, user, **kwargs):
                 f"The cache directory, {base_dir}, could not be created: {exc}"
             )
 
-    # delete current state before re-serializing new state
-    flush(bank, key, cachedir, **kwargs)
+    # Keep master keys readable until atomic replacement. Removing cluster.pem
+    # here lets another process mistake a join-reply update for a missing key
+    # and generate a new pair that overwrites the shared cluster identity.
+    if bank != "master_keys":
+        # Minion keys still need their previous acceptance state removed.
+        flush(bank, key, cachedir, **kwargs)
 
     tmpfh, tmpfname = tempfile.mkstemp(dir=base_dir)
     os.close(tmpfh)
@@ -164,6 +168,13 @@ def store(bank, key, data, cachedir, user, **kwargs):
                 os.chmod(tmpfname, 0o400)
 
         # On Windows, os.rename will fail if the destination file exists.
+        if (
+            bank == "master_keys"
+            and salt.utils.platform.is_windows()
+            and savefn.exists()
+        ):
+            # Windows cannot replace a read-only destination.
+            os.chmod(savefn, stat.S_IWRITE)
         salt.utils.atomicfile.atomic_rename(tmpfname, savefn)
     except OSError as exc:
         raise SaltCacheError(
