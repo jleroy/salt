@@ -137,3 +137,48 @@ class TestRequestServerIntegration:
         assert callable(
             salt.transport.zeromq.RequestServer.zmq_device_pooled
         ), "zmq_device_pooled should be callable"
+
+
+@pytest.mark.parametrize("port", [4515, 65055, 65535])
+@pytest.mark.parametrize("pool_name", ["", "default"])
+def test_default_worker_pool_uses_configured_tcp_port(port, pool_name):
+    """Default workers must keep the configured port, including near 65535."""
+    server = salt.transport.zeromq.RequestServer(
+        {"ipc_mode": "tcp", "tcp_master_workers": port, "pool_name": pool_name}
+    )
+    assert server.get_worker_uri() == f"tcp://127.0.0.1:{port}"
+    assert server.get_worker_uri(pool_name) == f"tcp://127.0.0.1:{port}"
+
+
+def test_named_worker_pool_keeps_tcp_offset():
+    """Non-default pools retain their existing deterministic TCP endpoints."""
+    server = salt.transport.zeromq.RequestServer(
+        {"ipc_mode": "tcp", "tcp_master_workers": 4515}
+    )
+    assert server.get_worker_uri("auth") == "tcp://127.0.0.1:5294"
+
+
+@pytest.mark.parametrize(
+    "port,pool_name", [(0, "default"), (65536, "default"), (65055, "auth")]
+)
+def test_worker_pool_rejects_invalid_tcp_port(port, pool_name):
+    """Reject invalid endpoints, including overflow caused by a pool offset."""
+    server = salt.transport.zeromq.RequestServer(
+        {"ipc_mode": "tcp", "tcp_master_workers": port}
+    )
+    with pytest.raises(ValueError, match="Invalid TCP worker port.*tcp_master_workers"):
+        server.get_worker_uri(pool_name)
+
+
+@pytest.mark.parametrize(
+    "pool_name,filename",
+    [
+        ("", "workers.ipc"),
+        ("default", "workers-default.ipc"),
+        ("auth", "workers-auth.ipc"),
+    ],
+)
+def test_worker_pool_keeps_ipc_path(tmp_path, pool_name, filename):
+    """TCP port handling must not change the named UNIX socket paths."""
+    server = salt.transport.zeromq.RequestServer({"sock_dir": str(tmp_path)})
+    assert server.get_worker_uri(pool_name) == f"ipc://{tmp_path / filename}"

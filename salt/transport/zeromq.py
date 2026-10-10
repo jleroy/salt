@@ -525,25 +525,8 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
             )
             os.nice(self.opts["mworker_queue_niceness"])
 
-        # Determine worker URI based on pool configuration
         pool_name = self.opts.get("pool_name", "")
-        if self.opts.get("ipc_mode", "") == "tcp":
-            base_port = self.opts.get("tcp_master_workers", 4515)
-            if pool_name:
-                # Use different port for each pool
-                port_offset = zlib.adler32(pool_name.encode()) % 1000
-                self.w_uri = f"tcp://127.0.0.1:{base_port + port_offset}"
-            else:
-                self.w_uri = f"tcp://127.0.0.1:{base_port}"
-        else:
-            if pool_name:
-                self.w_uri = "ipc://{}".format(
-                    os.path.join(self.opts["sock_dir"], f"workers-{pool_name}.ipc")
-                )
-            else:
-                self.w_uri = "ipc://{}".format(
-                    os.path.join(self.opts["sock_dir"], "workers.ipc")
-                )
+        self.w_uri = self.get_worker_uri(pool_name)
 
         log.info("Setting up the master communication server")
         log.info("RequestServer clients %s", self.uri)
@@ -635,15 +618,7 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
             dealer_socket = context.socket(zmq.DEALER)
             dealer_socket.setsockopt(zmq.LINGER, 1)
 
-            # Determine worker URI for this pool
-            if self.opts.get("ipc_mode", "") == "tcp":
-                base_port = self.opts.get("tcp_master_workers", 4515)
-                port_offset = zlib.adler32(pool_name.encode()) % 1000
-                w_uri = f"tcp://127.0.0.1:{base_port + port_offset}"
-            else:
-                w_uri = "ipc://{}".format(
-                    os.path.join(self.opts["sock_dir"], f"workers-{pool_name}.ipc")
-                )
+            w_uri = self.get_worker_uri(pool_name)
 
             log.info("RequestServer pool '%s' workers %s", pool_name, w_uri)
             dealer_socket.bind(w_uri)
@@ -977,13 +952,17 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
             pool_name = self.opts.get("pool_name", "")
 
         if self.opts.get("ipc_mode", "") == "tcp":
-            if pool_name:
-                # Hash pool name for consistent port assignment
-                base_port = self.opts.get("tcp_master_workers", 4515)
-                port_offset = zlib.adler32(pool_name.encode()) % 1000
-                return f"tcp://127.0.0.1:{base_port + port_offset}"
-            else:
-                return f"tcp://127.0.0.1:{self.opts.get('tcp_master_workers', 4515)}"
+            port = self.opts.get("tcp_master_workers", 4515)
+            # Keep the default pool on the configured port. Adding a hash
+            # offset can exceed 65535 or discard a port reserved by the caller.
+            if pool_name and pool_name != "default":
+                port += zlib.adler32(pool_name.encode()) % 1000
+            if not 1 <= port <= 65535:
+                raise ValueError(
+                    f"Invalid TCP worker port {port} for pool {pool_name!r}; "
+                    "check tcp_master_workers (port must be between 1 and 65535)"
+                )
+            return f"tcp://127.0.0.1:{port}"
         else:
             if pool_name:
                 return f"ipc://{os.path.join(self.opts['sock_dir'], f'workers-{pool_name}.ipc')}"
