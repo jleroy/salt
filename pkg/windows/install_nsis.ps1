@@ -29,6 +29,34 @@ $ErrorActionPreference = "Stop"
 # Script Functions
 #-------------------------------------------------------------------------------
 
+function Get-FileWithRetry {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string] $Uri,
+        [Parameter(Mandatory=$true)]
+        [string] $OutFile
+    )
+
+    # Retry transient download failures, such as GitHub gateway timeouts.
+    $maxAttempts = 3
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $Uri -OutFile $OutFile -TimeoutSec 120 -ErrorAction Stop
+            return
+        } catch {
+            # Never leave a partial download available for installation.
+            if (Test-Path -LiteralPath $OutFile) {
+                Remove-Item -LiteralPath $OutFile -Force
+            }
+            if ($attempt -eq $maxAttempts) {
+                throw "Download failed after $maxAttempts attempts for ${Uri}: $($_.Exception.Message)"
+            }
+            Write-Warning "Download attempt $attempt/$maxAttempts failed for ${Uri}: $($_.Exception.Message). Retrying in 30 seconds."
+            Start-Sleep -Seconds 30
+        }
+    }
+}
+
 function Write-Result($result, $ForegroundColor="Green") {
     if ( $CICD ) {
         Write-Host $result -ForegroundColor $ForegroundColor
@@ -70,7 +98,7 @@ if ( Test-Path -Path "$check_file" ) {
     Write-Host "Downloading NSIS: " -NoNewline
     $url = "$DEPS_URL/nsis-3.11-setup.exe"
     $file = "$env:TEMP\install_nsis.exe"
-    Invoke-WebRequest -Uri $url -OutFile "$file"
+    Get-FileWithRetry -Uri $url -OutFile "$file"
     if ( Test-Path -Path "$file" ) {
         Write-Result "Success" -ForegroundColor Green
     } else {
@@ -111,7 +139,7 @@ if ( Test-Path -Path $check_file ) {
     Write-Host "Downloading NSIS NxS Unzip (ansi) Plugin: " -NoNewline
     $url = "$DEPS_URL/nsis-plugin-nsisunz.zip"
     $file = "$env:TEMP\nsizunz.zip"
-    Invoke-WebRequest -Uri $url -OutFile "$file"
+    Get-FileWithRetry -Uri $url -OutFile "$file"
     if ( Test-Path -Path "$file" ) {
         Write-Result "Success" -ForegroundColor Green
     } else {
@@ -162,7 +190,7 @@ if ( Test-Path -Path $check_file ) {
     Write-Host "Downloading NSIS NxS Unzip (unicode) Plugin: " -NoNewline
     $url = "$DEPS_URL/nsis-plugin-nsisunzu.zip"
     $file = "$env:TEMP\nsisunzu.zip"
-    Invoke-WebRequest -Uri $url -OutFile "$file"
+    Get-FileWithRetry -Uri $url -OutFile "$file"
     if ( Test-Path -Path "$file" ) {
         Write-Result "Success" -ForegroundColor Green
     } else {
@@ -218,7 +246,7 @@ if ( (Test-Path -Path $check_file_a) -and (Test-Path -Path $check_file_u) ) {
     Write-Host "Downloading NSIS EnVar Plugin: " -NoNewline
     $url = "$DEPS_URL/nsis-plugin-envar.zip"
     $file = "$env:TEMP\nsisenvar.zip"
-    Invoke-WebRequest -Uri $url -OutFile "$file"
+    Get-FileWithRetry -Uri $url -OutFile "$file"
     if ( Test-Path -Path "$file" ) {
         Write-Result "Success" -ForegroundColor Green
     } else {
@@ -283,7 +311,7 @@ if ( (Test-Path -Path $check_file_a) -and (Test-Path -Path $check_file_u) ) {
     Write-Host "Downloading NSIS AccessControl Plugin: " -NoNewline
     $url = "$DEPS_URL/nsis-plugin-accesscontrol.zip"
     $file = "$env:TEMP\nsisaccesscontrol.zip"
-    Invoke-WebRequest -Uri $url -OutFile "$file"
+    Get-FileWithRetry -Uri $url -OutFile "$file"
     if ( Test-Path -Path "$file" ) {
         Write-Result "Success" -ForegroundColor Green
     } else {
@@ -348,7 +376,7 @@ if ( (Test-Path -Path $check_file_a) -and (Test-Path -Path $check_file_u) ) {
     Write-Host "Downloading NSIS SimpleSC (ansi) Plugin: " -NoNewline
     $url = "$DEPS_URL/nsis-plugin-simplesc.zip"
     $file = "$env:TEMP\nsisSimpleSC.zip"
-    Invoke-WebRequest -Uri $url -OutFile "$file"
+    Get-FileWithRetry -Uri $url -OutFile "$file"
     if ( Test-Path -Path "$file" ) {
         Write-Result "Success" -ForegroundColor Green
     } else {
@@ -388,7 +416,7 @@ if ( (Test-Path -Path $check_file_a) -and (Test-Path -Path $check_file_u) ) {
     Write-Host "Downloading NSIS SimpleSC (unicode) Plugin: " -NoNewline
     $url = "$DEPS_URL/nsis-plugin-simplescu.zip"
     $file = "$env:TEMP\nsisSimpleSCu.zip"
-    Invoke-WebRequest -Uri $url -OutFile "$file"
+    Get-FileWithRetry -Uri $url -OutFile "$file"
     if ( Test-Path -Path "$file" ) {
         Write-Result "Success" -ForegroundColor Green
     } else {
@@ -440,7 +468,7 @@ if ( Test-Path -Path $check_file ) {
     Write-Host "Installing NSIS MoveFileFolder Library: " -NoNewline
     $url = "$DEPS_URL/nsis-MoveFileFolder.nsh"
     $file = "$check_file"
-    Invoke-WebRequest -Uri $url -OutFile "$file"
+    Get-FileWithRetry -Uri $url -OutFile "$file"
     if ( Test-Path -Path "$file" ) {
         Write-Result "Success" -ForegroundColor Green
     } else {
