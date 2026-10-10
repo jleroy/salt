@@ -53,8 +53,9 @@ def test_zmq_slow_subscriber_drops_are_invisible(publisher):
 
     The PUB SNDHWM is per outbound connection, so filling the slow SUB's
     queue does NOT starve the fast SUB.  We assert that: fast SUB gets
-    everything, slow SUB gets far less than everything, slow SUB's
-    socket still ``getpeername()``-s (no FIN / RST / error).
+    everything in order, slow SUB loses messages, and its socket reports
+    no disconnect event. Pace batches on fast SUB reception so its own
+    queue does not overflow when the reader thread is delayed.
     """
     if publisher.transport != "zeromq":
         pytest.skip("zmq-only mechanism")
@@ -65,37 +66,50 @@ def test_zmq_slow_subscriber_drops_are_invisible(publisher):
     fast = make_subscriber(publisher)
     slow = make_subscriber(publisher, rcvhwm=10)
 
-    fast.connect()
-    fast.start_reader()
-    slow.connect()
-    # NOTE: we do NOT start slow's reader.  Its OS receive buffer +
-    # zmq RCVHWM fill fast; then the PUB's per-connection SNDHWM (=1000)
-    # fills; then further messages targeted at that SUB are silently
-    # dropped by the PUB.
-    time.sleep(1.0)  # settle SUB subscriptions (PUB slow-joiner)
-
     try:
+        fast.connect()
+        fast.start_reader()
+        slow.connect()
         with make_pusher(publisher) as pusher:
-            for i in range(n_events):
-                pusher.send(payload_bytes + f"-{i}".encode())
-            # Fast SUB should get everything (PUB SNDHWM is per-connection).
-            got_all_fast = fast.wait_for_frames(n_events, timeout=30.0)
+            # A connected SUB may not have registered its subscription yet.
+            # Confirm delivery to both peers before testing queue overflow.
+            probe = b"subscription-ready"
+            deadline = time.monotonic() + 10
+            slow_ready = False
+            while time.monotonic() < deadline:
+                pusher.send(probe)
+                if slow._sock.poll(timeout=100):
+                    slow_ready = slow._sock.recv() == probe
+                if slow_ready and probe in fast.frames:
+                    break
+            else:
+                pytest.fail("Both SUB subscriptions did not become ready")
 
-        # Let the slow SUB accumulate what it can into its OS buffer.
-        time.sleep(1.0)
+            # Keep each batch below the HWM and let the fast reader catch up.
+            # An unrestricted burst can overflow even the fast peer's queue
+            # when its reader thread is delayed by CI scheduling.
+            # The slow peer does not read at all during this load.
+            expected = [payload_bytes + f"-{i}".encode() for i in range(n_events)]
+            deadline = time.monotonic() + 30
+            for start in range(0, n_events, 100):
+                batch = expected[start : start + 100]
+                for payload in batch:
+                    pusher.send(payload)
+                while batch[-1] not in fast.frames:
+                    assert (
+                        time.monotonic() < deadline
+                    ), f"fast SUB did not receive batch ending at {start + len(batch)}"
+                    time.sleep(0.02)
 
         # Now drain the slow SUB to see how much it captured.
         slow.start_reader()
         time.sleep(2.0)
         slow.stop_reading()
 
-        assert got_all_fast, (
-            f"fast SUB only got {len(fast.frames)}/{n_events} — "
-            "PUB SNDHWM is shared across connections, that would be a regression"
-        )
-        drained_slow = len(slow.frames)
+        assert [frame for frame in fast.frames if frame != probe] == expected
+        drained_slow = sum(frame != probe for frame in slow.frames)
         # The whole point: slow SUB lost events.
-        assert drained_slow < n_events, (
+        assert 0 < drained_slow < n_events, (
             f"slow SUB received {drained_slow} of {n_events} — silent "
             "drop mechanism did not fire, HWM behavior may have changed"
         )
