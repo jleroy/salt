@@ -133,7 +133,9 @@ def test_peer_communication_denied(peer_salt_minion_1, peer_salt_minion_2):
 def test_peer_communication_limited_target_allowed(source, peer_salt_minion_1, request):
     cli = request.getfixturevalue(f"peer_salt_minion_{source}").salt_call_cli()
     tgt = peer_salt_minion_1.id
-    ret = cli.run("publish.publish", tgt, "grains.get", "hello_peer")
+    # Process startup and return delivery can exceed publish.publish's default
+    # five-second wait on macOS CI, independently of the overall test timeout.
+    ret = cli.run("publish.publish", tgt, "grains.get", "hello_peer", timeout=30)
     assert ret.returncode == 0
     assert ret.data
     assert tgt in ret.data
