@@ -185,11 +185,12 @@ def test_empty_jid_dir(jobs_dir):
     """
     test to ensure removal of empty jid dir
     """
-    # add empty jid dir
+    # Create an empty hash-prefix directory using the actual job cache layout.
     empty_jid_dir = []
-    new_jid_dir = jobs_dir / "z0"
-    new_jid_dir.mkdir(parents=True, exist_ok=True)
-    new_jid_dir = str(new_jid_dir)
+    new_jid_dir = os.path.dirname(
+        salt.utils.jid.jid_dir("20261009000000000000", str(jobs_dir))
+    )
+    os.makedirs(new_jid_dir, exist_ok=True)
     empty_jid_dir.append(new_jid_dir)
 
     # This needed due to a race condition in Windows

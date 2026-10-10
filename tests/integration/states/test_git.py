@@ -16,6 +16,7 @@ import pytest
 
 import salt.utils.files
 import salt.utils.path
+import salt.utils.platform
 from salt.utils.versions import Version
 from tests.support.case import ModuleCase
 from tests.support.helpers import TstSuiteLoggingHandler, with_tempdir
@@ -894,6 +895,10 @@ class LocalRepoGitTest(ModuleCase, SaltReturnAssertsMixin):
         assert "forced update" in ret["changes"]
 
     @pytest.mark.slow_test
+    # Sequential Salt calls in setup and the test can exceed 180s on macOS CI.
+    @pytest.mark.timeout_unless_on_windows(
+        240 if salt.utils.platform.is_darwin() else 90
+    )
     def test_latest_force_reset_true_non_fast_forward(self):
         """
         This tests that a non fast-forward change with divergent commits fails

@@ -63,9 +63,20 @@ class DictProxy(dict):
     """
 
     def __init__(self, target: dict, parent_optsdict: OptsDict, key: str):
-        # Initialize underlying dict with target data AND keep _target
-        # We need both: underlying dict for C code, _target for our logic
-        super().__init__(target)
+        # We keep two views of the data: the underlying dict (so C code and
+        # isinstance checks see real contents) and _target (used by our logic).
+        #
+        # To populate the underlying dict we must NOT hand a proxy to
+        # super().__init__(): CPython would iterate it through __getitem__,
+        # which triggers copy-on-access and so mutates/copies the source just
+        # by constructing this proxy. That also leads to infinite recursion
+        # when deepcopying opts that reference themselves. Unwrap to the raw
+        # plain dict first (the chain can be several proxies deep, e.g. a proxy
+        # stored back into _local by apply_sdb then re-wrapped on next access).
+        raw = target
+        while isinstance(raw, DictProxy):
+            raw = object.__getattribute__(raw, "_target")
+        super().__init__(raw)
         object.__setattr__(self, "_target", target)
         object.__setattr__(self, "_parent", parent_optsdict)
         object.__setattr__(self, "_key", key)
@@ -181,9 +192,17 @@ class ListProxy(list):
     """
 
     def __init__(self, target: list, parent_optsdict: OptsDict, key: str):
-        # Initialize underlying list with target data AND keep _target
-        # We need both: underlying list for C code, _target for our logic
-        super().__init__(target)
+        # We keep two views of the data: the underlying list (so C code and
+        # isinstance checks see real contents) and _target (used by our logic).
+        #
+        # Unwrap any proxy before handing the data to super().__init__(): a
+        # proxy would be iterated through __getitem__, triggering copy-on-access
+        # on the source merely by constructing this proxy (see DictProxy for the
+        # full rationale).
+        raw = target
+        while isinstance(raw, ListProxy):
+            raw = object.__getattribute__(raw, "_target")
+        super().__init__(raw)
         object.__setattr__(self, "_target", target)
         object.__setattr__(self, "_parent", parent_optsdict)
         object.__setattr__(self, "_key", key)

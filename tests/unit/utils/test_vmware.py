@@ -2342,18 +2342,18 @@ class GetServiceInstanceFromManagedObjectTestCase(TestCase):
 
     def test_default_name_parameter(self):
         mock_trace = MagicMock()
-        type(salt.utils.vmware.log).trace = mock_trace
-        salt.utils.vmware.get_service_instance_from_managed_object(self.mock_mo_ref)
+        with patch.object(type(salt.utils.vmware.log), "trace", mock_trace):
+            salt.utils.vmware.get_service_instance_from_managed_object(self.mock_mo_ref)
         mock_trace.assert_called_once_with(
             "[%s] Retrieving service instance from managed object", "<unnamed>"
         )
 
     def test_name_parameter_passed_in(self):
         mock_trace = MagicMock()
-        type(salt.utils.vmware.log).trace = mock_trace
-        salt.utils.vmware.get_service_instance_from_managed_object(
-            self.mock_mo_ref, "fake_mo_name"
-        )
+        with patch.object(type(salt.utils.vmware.log), "trace", mock_trace):
+            salt.utils.vmware.get_service_instance_from_managed_object(
+                self.mock_mo_ref, "fake_mo_name"
+            )
         mock_trace.assert_called_once_with(
             "[%s] Retrieving service instance from managed object", "fake_mo_name"
         )

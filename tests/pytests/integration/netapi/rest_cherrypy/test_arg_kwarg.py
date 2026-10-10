@@ -7,6 +7,8 @@ import salt.utils.json
 
 @pytest.mark.slow_test
 @pytest.mark.netapi_client_data(["local", "runner"])
+# Four sequential runner calls can exceed the default async timeout on slow CI.
+@pytest.mark.async_timeout(seconds=120)
 async def test_accepts_arg_kwarg_keys(
     http_client, auth_creds, content_type_map, subtests
 ):

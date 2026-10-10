@@ -14,25 +14,24 @@ def app_urls():
 
 @pytest.mark.slow_test
 @pytest.mark.async_timeout(seconds=120)
-async def test_get(http_client, subtests):
+async def test_get(http_client):
     # test with no JID
     response = await http_client.fetch("/jobs", method="GET", follow_redirects=False)
     response_obj = salt.utils.json.loads(response.body)["return"][0]
     assert response_obj
     assert isinstance(response_obj, dict)
-    for ret in response_obj.values():
-        with subtests.test('assert "Function" in ret'):
-            assert "Function" in ret
-        with subtests.test('assert "Target" in ret'):
-            assert "Target" in ret
-        with subtests.test('assert "Target-type" in ret'):
-            assert "Target-type" in ret
-        with subtests.test('assert "User" in ret'):
-            assert "User" in ret
-        with subtests.test('assert "StartTime" in ret'):
-            assert "StartTime" in ret
-        with subtests.test('assert "Arguments" in ret'):
-            assert "Arguments" in ret
+    required_fields = {
+        "Function",
+        "Target",
+        "Target-type",
+        "User",
+        "StartTime",
+        "Arguments",
+    }
+    # Per-field subtests trigger expensive process statistics collection in CI.
+    for jid, ret in response_obj.items():
+        missing = required_fields.difference(ret)
+        assert not missing, f"Job {jid} is missing fields: {sorted(missing)}"
 
     # test with a specific JID passed in
     jid = next(iter(response_obj.keys()))
@@ -45,17 +44,5 @@ async def test_get(http_client, subtests):
     assert response_obj
     assert isinstance(response_obj, dict)
 
-    with subtests.test('assert "Function" in response_obj'):
-        assert "Function" in response_obj
-    with subtests.test('assert "Target" in response_obj'):
-        assert "Target" in response_obj
-    with subtests.test('assert "Target-type" in response_obj'):
-        assert "Target-type" in response_obj
-    with subtests.test('assert "User" in response_obj'):
-        assert "User" in response_obj
-    with subtests.test('assert "StartTime" in response_obj'):
-        assert "StartTime" in response_obj
-    with subtests.test('assert "Arguments" in response_obj'):
-        assert "Arguments" in response_obj
-    with subtests.test('assert "Result" in response_obj'):
-        assert "Result" in response_obj
+    missing = (required_fields | {"Result"}).difference(response_obj)
+    assert not missing, f"Job {jid} is missing fields: {sorted(missing)}"

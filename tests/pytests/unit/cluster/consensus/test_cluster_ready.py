@@ -54,6 +54,26 @@ class TestClusterIsReady:
             mock_smaster.secrets = {"cluster_ready": {"event": event}}
             assert _cluster_is_ready({"cluster_id": "test"}) is True
 
+    def test_cluster_ready_via_sentinel_when_event_missed(self, tmp_path):
+        import salt.cluster.healthchecks
+        from salt.channel.server import _cluster_is_ready
+
+        opts = {"cluster_id": "test", "cachedir": str(tmp_path)}
+        salt.cluster.healthchecks.mark_cluster_ready(opts)
+        event = multiprocessing.Event()
+        with patch("salt.master.SMaster") as mock_smaster:
+            mock_smaster.secrets = {"cluster_ready": {"event": event}}
+            assert _cluster_is_ready(opts) is True
+
+    def test_cluster_not_ready_when_no_sentinel(self, tmp_path):
+        from salt.channel.server import _cluster_is_ready
+
+        opts = {"cluster_id": "test", "cachedir": str(tmp_path)}
+        event = multiprocessing.Event()
+        with patch("salt.master.SMaster") as mock_smaster:
+            mock_smaster.secrets = {"cluster_ready": {"event": event}}
+            assert _cluster_is_ready(opts) is False
+
 
 # ---------------------------------------------------------------------------
 # ReqServerChannel gate

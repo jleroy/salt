@@ -27,6 +27,8 @@ def whitelisted_scheduler_minion(salt_master):
     minion = salt_master.salt_minion_daemon(
         "test-scheduler-whitelist-dunder-minion",
         overrides={
+            # Use local TCP IPC to avoid UNIX socket path length limits on macOS.
+            "ipc_mode": "tcp",
             "whitelist_modules": [
                 "test",
                 "grains",

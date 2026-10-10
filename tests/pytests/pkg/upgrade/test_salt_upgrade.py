@@ -8,6 +8,7 @@ import time
 import packaging.version
 import psutil
 import pytest
+from pytestshellutils.exceptions import FactoryTimeout
 from pytestskipmarkers.utils import platform
 
 import salt.utils.path
@@ -158,8 +159,14 @@ def salt_test_upgrade(
 
     start = time.monotonic()
     while True:
-        ret = salt_call_cli.run("--local", "test.version", _timeout=10)
-        if ret.returncode == 0:
+        try:
+            ret = salt_call_cli.run("--local", "test.version", _timeout=10)
+        except FactoryTimeout:
+            # ``salt-call`` can be slow to exit right after the upgrade (cold
+            # start on Windows), so a timed-out attempt is retried rather than
+            # fatal.
+            ret = None
+        if ret is not None and ret.returncode == 0:
             break
         if time.monotonic() - start > 60:
             break

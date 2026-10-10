@@ -510,6 +510,8 @@ def test_orchestrate_subset(
       salt.state:
         - tgt: '*minion*'
         - subset: 1
+        # Subset discovery loads minion modules, which can be slow on macOS CI.
+        - timeout: 60
         - sls: test
     """
     test_sls = """
@@ -520,7 +522,8 @@ def test_orchestrate_subset(
     with salt_master.state_tree.base.temp_file(
         "orch/subset.sls", sls_contents
     ), salt_master.state_tree.base.temp_file("test.sls", test_sls):
-        ret = salt_run_cli.run("state.orchestrate", "orch.subset", _timeout=60)
+        # Allow time for both subset discovery and the subsequent state run.
+        ret = salt_run_cli.run("state.orchestrate", "orch.subset", _timeout=120)
         assert ret.returncode == 0
 
     for state_data in ret.data["data"][salt_master.id].values():

@@ -20,6 +20,26 @@ def pkg(modules):
     return modules.pkg
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _refresh_brew_db(pkg):
+    """
+    Refresh Homebrew's package db once for the whole module.
+
+    ``latest_version`` / ``list_upgrades`` / ``refresh_db`` each run their own
+    ``brew update`` by default; back-to-back updates race on Homebrew's update
+    lock ("Another `brew update` process is already running"). Update once here
+    and have the individual tests pass ``refresh=False``.
+
+    Best effort: if brew is momentarily busy the tests still work against the
+    current db (they don't assert on its freshness), so don't error the whole
+    module.
+    """
+    try:
+        pkg.refresh_db()
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
 @pytest.fixture
 def pkg_1_name(pkg):
     pkg_name = "htop"
@@ -91,10 +111,10 @@ def test_latest_version(pkg, pkg_1_name):
       - check that the latest version is empty after installing it
     """
     pkg.remove(pkg_1_name)
-    uninstalled_latest = pkg.latest_version(pkg_1_name)
+    uninstalled_latest = pkg.latest_version(pkg_1_name, refresh=False)
 
     pkg.install(pkg_1_name)
-    installed_latest = pkg.latest_version(pkg_1_name)
+    installed_latest = pkg.latest_version(pkg_1_name, refresh=False)
     version = pkg.version(pkg_1_name)
     assert isinstance(uninstalled_latest, str)
     assert installed_latest == version
@@ -112,7 +132,7 @@ def test_list_upgrades(pkg, pkg_1_name):
     """
     Test pkg.list_upgrades: data is in the form {'name1': 'version1', 'name2': 'version2', ... }
     """
-    upgrades = pkg.list_upgrades()
+    upgrades = pkg.list_upgrades(refresh=False)
     assert isinstance(upgrades, dict)
     if upgrades:
         for name in upgrades:

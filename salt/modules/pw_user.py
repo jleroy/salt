@@ -185,7 +185,7 @@ def add(
     return __salt__["cmd.retcode"](cmd, python_shell=False) == 0
 
 
-def delete(name, remove=False, force=False):
+def delete(name, remove=False, force=False, **kwargs):
     """
     Remove a user from the minion
 

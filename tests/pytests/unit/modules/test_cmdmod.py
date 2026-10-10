@@ -304,6 +304,9 @@ def test_run_user_not_available():
 
 
 @pytest.mark.skip_on_windows
+@pytest.mark.skip_on_darwin(
+    reason="macOS uses inline su instead of separate environment retrieval"
+)
 def test_run_runas_env_retrieval_timeout(caplog):
     """
     Regression test for issue #63901 / PR #63912.
@@ -344,10 +347,8 @@ def test_run_runas_env_retrieval_timeout(caplog):
     fake_pw = MagicMock(pw_name="baz", pw_shell="/bin/sh")
 
     with patch("salt.modules.cmdmod._is_valid_shell", mock_true), patch(
-        "salt.utils.platform.is_windows", MagicMock(return_value=False)
-    ), patch("os.path.isfile", mock_true), patch("os.access", mock_true), patch(
-        "os.path.isabs", mock_true
-    ), patch(
+        "os.path.isfile", mock_true
+    ), patch("os.access", mock_true), patch("os.path.isabs", mock_true), patch(
         "os.path.isdir", mock_true
     ), patch(
         "pwd.getpwnam", MagicMock(return_value=fake_pw)
@@ -366,6 +367,9 @@ def test_run_runas_env_retrieval_timeout(caplog):
         with caplog.at_level(logging.ERROR, logger="salt.modules.cmdmod"):
             # Must not raise; TimeoutExpired must be caught inside _run.
             ret = cmdmod._run("echo hi", "bar", runas="baz", python_shell=True)
+
+    env_popen_instance.communicate.assert_called_once()
+    assert env_popen_instance.communicate.call_args.kwargs["timeout"] == 10
 
     # The fix routes the TimeoutExpired into the existing "Environment
     # could not be retrieved" error log.
@@ -726,43 +730,53 @@ def test_shell_properly_handled_on_macOS():
         cmd_handler.cmd = " ".join(__cmd__)
         return MagicMock(return_value=MockTimedProc(stdout=None, stderr=None))
 
-    with patch("pwd.getpwnam") as getpwnam_mock:
-        with patch("salt.utils.timed_subprocess.TimedProc", mock_proc):
-
-            # User default shell is '/usr/local/bin/bash'
-            user_default_shell = "/usr/local/bin/bash"
-            with patch(
-                "pwd.getpwall",
-                Mock(
-                    return_value=[Mock(pw_shell=user_default_shell, pw_name="foobar")]
-                ),
-            ):
-                cmd_handler.clear()
-                cmdmod._run(
-                    "ls", cwd=tempfile.gettempdir(), runas="foobar", use_vt=False
+    with patch("salt.utils.timed_subprocess.TimedProc", mock_proc):
+        # User default shell is '/usr/local/bin/bash'
+        user_default_shell = "/usr/local/bin/bash"
+        with patch(
+            "pwd.getpwnam",
+            Mock(
+                return_value=Mock(
+                    pw_shell=user_default_shell,
+                    pw_name="foobar",
                 )
+            ),
+        ):
+            cmd_handler.clear()
+            cmdmod._run(
+                "ls",
+                cwd=tempfile.gettempdir(),
+                runas="foobar",
+                use_vt=False,
+            )
 
-                assert re.search(
-                    f"{user_default_shell} -l -c", cmd_handler.cmd
-                ), "cmd invokes right bash session on macOS"
+            assert re.search(
+                f"{user_default_shell} -l -c", cmd_handler.cmd
+            ), "cmd invokes right bash session on macOS"
 
-            # User default shell is '/bin/zsh'
-            user_default_shell = "/bin/zsh"
-            with patch(
-                "pwd.getpwall",
-                Mock(
-                    return_value=[Mock(pw_shell=user_default_shell, pw_name="foobar")]
+        # User default shell is '/bin/zsh'
+        user_default_shell = "/bin/zsh"
+        with patch(
+            "pwd.getpwnam",
+            Mock(
+                return_value=Mock(
+                    pw_shell=user_default_shell,
+                    pw_name="foobar",
                 ),
-            ):
+            ),
+        ):
+            cmd_handler.clear()
+            cmdmod._run(
+                "ls",
+                cwd=tempfile.gettempdir(),
+                runas="foobar",
+                use_vt=False,
+            )
 
-                cmd_handler.clear()
-                cmdmod._run(
-                    "ls", cwd=tempfile.gettempdir(), runas="foobar", use_vt=False
-                )
-
-                assert not re.search(
-                    "bash -l -c", cmd_handler.cmd
-                ), "cmd does not invoke user shell on macOS"
+            assert not re.search(
+                "bash -l -c",
+                cmd_handler.cmd,
+            ), "cmd does not invoke user shell on macOS"
 
 
 @pytest.mark.skip_on_windows

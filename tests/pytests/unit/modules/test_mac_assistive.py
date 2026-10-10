@@ -1,59 +1,27 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 
 import salt.modules.mac_assistive as assistive
 from salt.exceptions import CommandExecutionError
 from tests.support.mock import patch
+from tests.support.runtests import RUNTIME_VARS
 
-# DO NOT CHANGE THE SCHEMA BELLOW TO SPLIT LINES, ETC.
-# A sha1sum of it will be used to decide which schema to use
-BIGSUR_DB_SCHEMA = """\
-CREATE TABLE admin (key TEXT PRIMARY KEY NOT NULL, value INTEGER NOT NULL);
-CREATE TABLE policies ( id              INTEGER NOT NULL PRIMARY KEY,   bundle_id       TEXT    NOT NULL,       uuid            TEXT    NOT NULL,       display         TEXT    NOT NULL,       UNIQUE (bundle_id, uuid));
-CREATE TABLE active_policy (    client          TEXT    NOT NULL,       client_type     INTEGER NOT NULL,       policy_id       INTEGER NOT NULL,       PRIMARY KEY (client, client_type),      FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE ON UPDATE CASCADE);
-CREATE INDEX active_policy_id ON active_policy(policy_id);
-CREATE TABLE access_overrides ( service         TEXT    NOT NULL PRIMARY KEY);
-CREATE TABLE expired (    service        TEXT        NOT NULL,     client         TEXT        NOT NULL,     client_type    INTEGER     NOT NULL,     csreq          BLOB,     last_modified  INTEGER     NOT NULL ,     expired_at     INTEGER     NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),     PRIMARY KEY (service, client, client_type));
-CREATE TABLE IF NOT EXISTS "access" (    service        TEXT        NOT NULL,     client         TEXT        NOT NULL,     client_type    INTEGER     NOT NULL,     auth_value     INTEGER     NOT NULL,     auth_reason    INTEGER     NOT NULL,     auth_version   INTEGER     NOT NULL,     csreq          BLOB,     policy_id      INTEGER,     indirect_object_identifier_type    INTEGER,     indirect_object_identifier         TEXT NOT NULL DEFAULT 'UNUSED',     indirect_object_code_identity      BLOB,     flags          INTEGER,     last_modified  INTEGER     NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),     PRIMARY KEY (service, client, client_type, indirect_object_identifier),    FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE ON UPDATE CASCADE);
-"""
-CATALINA_DB_SCHEMA = """\
-CREATE TABLE admin (key TEXT PRIMARY KEY NOT NULL, value INTEGER NOT NULL);
-CREATE TABLE policies ( id              INTEGER NOT NULL PRIMARY KEY,   bundle_id       TEXT    NOT NULL,       uuid            TEXT    NOT NULL,       display         TEXT    NOT NULL,       UNIQUE (bundle_id, uuid));
-CREATE TABLE active_policy (    client          TEXT    NOT NULL,       client_type     INTEGER NOT NULL,       policy_id       INTEGER NOT NULL,       PRIMARY KEY (client, client_type),      FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE ON UPDATE CASCADE);
-CREATE INDEX active_policy_id ON active_policy(policy_id);
-CREATE TABLE access_overrides ( service         TEXT    NOT NULL PRIMARY KEY);
-CREATE TABLE expired (    service        TEXT        NOT NULL,     client         TEXT        NOT NULL,     client_type    INTEGER     NOT NULL,     csreq          BLOB,     last_modified  INTEGER     NOT NULL ,     expired_at     INTEGER     NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),     PRIMARY KEY (service, client, client_type));
-CREATE TABLE IF NOT EXISTS "access" (    service        TEXT        NOT NULL,     client         TEXT        NOT NULL,     client_type    INTEGER     NOT NULL,     auth_value     INTEGER     NOT NULL,     auth_reason    INTEGER     NOT NULL,     auth_version   INTEGER     NOT NULL,     csreq          BLOB,     policy_id      INTEGER,     indirect_object_identifier_type    INTEGER,     indirect_object_identifier         TEXT NOT NULL DEFAULT 'UNUSED',     indirect_object_code_identity      BLOB,     flags          INTEGER,     last_modified  INTEGER     NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),     PRIMARY KEY (service, client, client_type, indirect_object_identifier),    FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE ON UPDATE CASCADE);
-"""
+# Schemas extracted from tccd, including the admin version used for dispatch.
+SCHEMAS = sorted(
+    (Path(RUNTIME_VARS.TESTS_DIR) / "unit" / "files" / "tcc").glob("*.sql")
+)
 
 
-@pytest.fixture(params=("Catalina", "BigSur"))
-def macos_version(request):
-    return request.param
-
-
-@pytest.fixture(autouse=True)
-def tcc_db_path(tmp_path, macos_version):
+@pytest.fixture(autouse=True, params=SCHEMAS, ids=lambda path: path.stem)
+def tcc_db_path(tmp_path, request):
     db = tmp_path / "tcc.db"
-    if macos_version == "BigSur":
-        schema = BIGSUR_DB_SCHEMA
-    elif macos_version == "Catalina":
-        schema = CATALINA_DB_SCHEMA
-    else:
-        # A new macOS version?
-        # Spin a VM and run the following:
-        #    sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db"
-        #
-        # Then, when the DB is open in sqlite,  issue the following
-        #   .schema
-        #
-        # Copy/Paste the output of that to this test.
-        pytest.fail(f"Don't know how to handle {macos_version}")
-    conn = sqlite3.connect(str(db))
-    with conn:
-        for stmt in schema.splitlines():
-            conn.execute(stmt)
+    conn = sqlite3.connect(db)
+    try:
+        conn.executescript(request.param.read_text())
+    finally:
+        conn.close()
     return str(db)
 
 
@@ -145,3 +113,41 @@ def test_remove_assistive_error():
     """
     with patch.object(assistive.TccDB, "remove", side_effect=sqlite3.Error("Foo")):
         pytest.raises(CommandExecutionError, assistive.remove, "foo")
+
+
+@pytest.mark.parametrize("version", [18, 28, 33, 34, 35, None])
+def test_unsupported_schema_version(tcc_db_path, version):
+    with sqlite3.connect(tcc_db_path) as conn:
+        if version is None:
+            conn.execute("DELETE FROM admin WHERE key = 'version'")
+        else:
+            conn.execute("UPDATE admin SET value = ? WHERE key = 'version'", (version,))
+    with pytest.raises(
+        CommandExecutionError, match="Unsupported TCC database schema version"
+    ):
+        assistive.install("foo")
+
+
+def test_assistive_lifecycle(tcc_db_path):
+    """Exercise writes and reads against each extracted TCC schema."""
+    app_id = "/usr/bin/osascript"
+    assert assistive.install(app_id, enable=False)
+    assert assistive.installed(app_id)
+    assert not assistive.enabled(app_id)
+    assert assistive.enable_(app_id)
+    assert assistive.enabled(app_id)
+    assert assistive.enable_(app_id, False)
+    assert not assistive.enabled(app_id)
+    assert assistive.remove(app_id)
+    assert not assistive.installed(app_id)
+
+
+@pytest.mark.parametrize(
+    "osrelease, supported", [("10.15.7", False), ("11.0.1", True), ("27.0", True)]
+)
+def test_virtual_macos_version(osrelease, supported):
+    with patch.object(
+        assistive.salt.utils.platform, "is_darwin", return_value=True
+    ), patch.dict(assistive.__grains__, {"osrelease": osrelease}):
+        result = assistive.__virtual__()
+    assert (result == "assistive") is supported

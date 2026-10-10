@@ -4,6 +4,7 @@ Module for editing date/time settings on macOS
  .. versionadded:: 2016.3.0
 """
 
+import time
 from datetime import datetime
 
 import salt.utils.mac_utils
@@ -241,7 +242,14 @@ def set_zone(time_zone):
 
     salt.utils.mac_utils.execute_return_success(f"systemsetup -settimezone {time_zone}")
 
-    return time_zone in get_zone()
+    # systemsetup applies the change asynchronously after ``-settimezone``
+    # returns, so ``-gettimezone`` can briefly still report the previous zone.
+    # Poll a few times before reporting the change as unsuccessful.
+    for _ in range(3):
+        if time_zone in get_zone():
+            return True
+        time.sleep(1)
+    return False
 
 
 def zone_compare(time_zone):

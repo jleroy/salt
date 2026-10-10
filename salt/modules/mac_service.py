@@ -427,6 +427,11 @@ def start(name, runas=None):
     # Get the domain target.
     domain_target, path = _get_domain_target(name)
 
+    # If the service is already loaded, bootstrapping it again will fail with
+    # generic error "Bootstrap failed: 5: Input/output error".
+    if __salt__["service.loaded"](name, runas=runas):
+        return True
+
     # Load (bootstrap) the service: will raise an error if it fails
     return launchctl("bootstrap", domain_target, path, runas=runas)
 

@@ -402,7 +402,12 @@ class PipStateUtilsTest(TestCase):
         mock_modules = sys.modules.copy()
         mock_modules.pop("pip", None)
         mock_modules["pip"] = object()
-        with patch("sys.modules", mock_modules):
+        # purge_pip() deletes the module-level ``pip`` global as a side effect.
+        # Patch it so it is restored on exit and the deletion does not leak into
+        # unrelated tests that rely on the global (e.g. test_issue_64169 in
+        # tests/pytests/unit/states/test_pip.py), which made them flaky
+        # depending on test execution order.
+        with patch("sys.modules", mock_modules), patch.object(pip_state, "pip", pip):
             pip_state.purge_pip()
         assert "pip" not in mock_modules
 
