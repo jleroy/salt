@@ -200,6 +200,8 @@ def cluster_master_1(request, salt_factories, cluster_pki_path, cluster_cache_pa
     config_overrides = {
         "interface": "127.0.0.1",
         "cluster_id": "master_cluster",
+        # Limit process startup overhead while retaining concurrent request handling.
+        "worker_threads": 2,
         "cluster_peers": [
             "127.0.0.2",
             "127.0.0.3",
@@ -242,6 +244,8 @@ def cluster_master_2(salt_factories, cluster_master_1):
     config_overrides = {
         "interface": "127.0.0.2",
         "cluster_id": "master_cluster",
+        # Limit process startup overhead while retaining concurrent request handling.
+        "worker_threads": 2,
         "cluster_peers": [
             "127.0.0.1",
             "127.0.0.3",
@@ -291,6 +295,8 @@ def cluster_master_3(salt_factories, cluster_master_1):
     config_overrides = {
         "interface": "127.0.0.3",
         "cluster_id": "master_cluster",
+        # Limit process startup overhead while retaining concurrent request handling.
+        "worker_threads": 2,
         "cluster_peers": [
             "127.0.0.1",
             "127.0.0.2",
@@ -351,6 +357,8 @@ def cluster_master_4(
     config_overrides = {
         "interface": "127.0.0.4",
         "cluster_id": "master_cluster",
+        # Limit process startup overhead while retaining concurrent request handling.
+        "worker_threads": 2,
         "cluster_peers": [
             "127.0.0.1",
             "127.0.0.2",
@@ -451,6 +459,8 @@ def _isolated_master_overrides(
     overrides = {
         "interface": addr,
         "cluster_id": "master_cluster",
+        # Limit process startup overhead while retaining concurrent request handling.
+        "worker_threads": 2,
         "cluster_peers": list(peers),
         "cluster_pki_dir": str(pki_paths[addr]),
         "cache_dir": str(cache_paths[addr]),
