@@ -10,29 +10,42 @@ async def test_publsh_server(
 
     pub_server = salt.transport.publish_server(master_opts)
     pub_server.pre_fork(process_manager)
-    await asyncio.sleep(3)
 
     pub_client = salt.transport.publish_client(
         minion_opts, io_loop, master_opts["interface"], master_opts["publish_port"]
     )
-    await pub_client.connect()
-
-    # Yield to loop in order to allow pub client to connect.
+    ready = asyncio.Event()
     event = asyncio.Event()
-
     messages = []
+    # TODO: Fix this inconsistancy.
+    if transport == "zeromq":
+        probe = b"publish-ready"
+        msg = b"meh"
+    else:
+        probe = {b"probe": b"publish-ready"}
+        msg = {b"foo": b"bar"}
 
-    async def handle_msg(msg):
-        messages.append(msg)
+    async def handle_msg(payload):
+        if payload == probe:
+            ready.set()
+            return
+        messages.append(payload)
         event.set()
 
-    try:
+    async def wait_until_ready():
+        await pub_client.connect()
         pub_client.on_recv(handle_msg)
-        # TODO: Fix this inconsistancy.
-        if transport == "zeromq":
-            msg = b"meh"
-        else:
-            msg = {b"foo": b"bar"}
+        # ZeroMQ connect() does not wait for the subscription to reach the
+        # publisher. Probe until delivery works before sending the test message.
+        while not ready.is_set():
+            await pub_server.publish(probe)
+            try:
+                await asyncio.wait_for(ready.wait(), 0.1)
+            except asyncio.TimeoutError:
+                pass
+
+    try:
+        await asyncio.wait_for(wait_until_ready(), 10)
         await pub_server.publish(msg)
         await asyncio.wait_for(event.wait(), 1)
         assert [msg] == messages
