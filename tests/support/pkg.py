@@ -662,6 +662,39 @@ class SaltPkgInstall:
             return pathlib.Path("/opt/salt")
         return pathlib.Path("/")
 
+    def _run_macos_installer(self, pkg):
+        """Run the installer and preserve diagnostics on failure or timeout."""
+        ret = None
+        try:
+            ret = self.proc.run("installer", "-pkg", str(pkg), "-target", "/")
+            return ret
+        finally:
+            if ret is None or ret.returncode != 0:
+                self._collect_macos_installer_logs()
+
+    @staticmethod
+    def _collect_macos_installer_logs():
+        """Keep full installer logs in CI artifacts and log their final lines."""
+        # The installer only reports that a package script failed; these logs
+        # identify the failing command without changing installation behavior.
+        destination = (
+            CODE_DIR / "artifacts" / "logs" / f"macos-installer-{time.time_ns()}"
+        )
+        for source in (
+            pathlib.Path("/tmp/preinstall.txt"),
+            pathlib.Path("/tmp/postinstall.txt"),
+            pathlib.Path("/var/log/install.log"),
+        ):
+            try:
+                destination.mkdir(parents=True, exist_ok=True)
+                saved = destination / source.name
+                shutil.copyfile(source, saved)
+                lines = saved.read_text(encoding="utf-8", errors="replace").splitlines()
+                log.error("Last 200 lines of %s:\n%s", source, "\n".join(lines[-200:]))
+            except OSError as exc:
+                # Diagnostics must not hide the original installation failure.
+                log.warning("Could not collect installer log %s: %s", source, exc)
+
     def _check_retcode(self, ret):
         """
         Helper function to check subprocess.run returncode equals 0
@@ -763,7 +796,7 @@ class SaltPkgInstall:
         elif platform.is_darwin():
             daemons_dir = pathlib.Path("/Library", "LaunchDaemons")
             log.debug("Installing: %s", str(pkg))
-            ret = self.proc.run("installer", "-pkg", str(pkg), "-target", "/")
+            ret = self._run_macos_installer(pkg)
             self._check_retcode(ret)
 
             # The installer's postinstall script starts the minion and may trigger
@@ -1367,7 +1400,7 @@ class SaltPkgInstall:
                     f"/tmp/{mac_pkg}",
                 )
 
-            ret = self.proc.run("installer", "-pkg", mac_pkg_path, "-target", "/")
+            ret = self._run_macos_installer(mac_pkg_path)
             self._check_retcode(ret)
 
             # Stop services started by the old installer so the test framework
