@@ -2361,15 +2361,20 @@ def test_private_key_managed_passphrase_removed_overwrite(x509, pk_args):
 @pytest.mark.usefixtures("existing_pk")
 @pytest.mark.parametrize("existing_pk", [{"passphrase": "password"}], indirect=True)
 def test_private_key_managed_passphrase_changed_not_overwrite(x509, pk_args):
+    key_path = pathlib.Path(pk_args["name"])
+    original_key = key_path.read_bytes()
     pk_args["passphrase"] = "hunter1"
     ret = x509.private_key_managed(**pk_args)
     assert ret.result is False
     assert not ret.changes
+    assert key_path.read_bytes() == original_key
+    # A wrong passphrase can also cause a deserialization error, depending on
+    # the encrypted bytes. The state translates that error into its own message.
     assert any(
         x in ret.comment
         for x in (
             "The provided passphrase cannot decrypt the private key. Pass overwrite",
-            "Could not load PEM-encoded private key",
+            "The existing file does not seem to be a private key formatted as DER, PEM or embedded in PKCS12. Pass overwrite",
         )
     )
 
