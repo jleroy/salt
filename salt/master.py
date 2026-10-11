@@ -5573,6 +5573,11 @@ class ClearFuncs(TransportMethods):
                         ),
                     },
                 }
+        if "batch_handoff" in extra:
+            # Authorize the complete target and command above before persisting
+            # master-driven work. Never accept a client-supplied user or state.
+            return self._handoff_batch(clear_load, extra, minions, missing)
+
         if extra.get("batch", None) and batch_async_required(self.opts, minions, extra):
             return await self.publish_batch(clear_load, minions, missing)
 
@@ -5600,6 +5605,47 @@ class ClearFuncs(TransportMethods):
         return {
             "enc": "clear",
             "load": {"jid": clear_load["jid"], "minions": minions, "missing": missing},
+        }
+
+    def _handoff_batch(self, clear_load, extra, minions, missing):
+        """Persist an authorized async batch without publishing its first lot."""
+        import salt.utils.batch_output
+        import salt.utils.batch_state
+
+        options = extra["batch_handoff"]
+        if not isinstance(options, dict):
+            return {"error": "batch_handoff must be a dictionary"}
+        jid = self._prep_jid(clear_load, extra)
+        if jid is None or isinstance(jid, dict):
+            return jid or {"error": "Master failed to assign jid"}
+        state_opts = {
+            key: options[key]
+            for key in (
+                "batch",
+                "failhard",
+                "batch_wait",
+                "timeout",
+                "gather_job_timeout",
+            )
+            if key in options
+        }
+        state_opts.update(
+            {key: clear_load[key] for key in ("fun", "arg", "tgt", "tgt_type", "user")}
+        )
+        state_opts["ret"] = clear_load.get("ret", "")
+        state = salt.utils.batch_state.create_batch_state(
+            state_opts, minions, jid, driver="master"
+        )
+        self._prep_pub(minions, jid, clear_load, extra, missing)
+        salt.utils.batch_state.write_batch_state(jid, state, self.opts)
+        salt.utils.batch_state.add_to_active_index(jid, self.opts)
+        self.event.fire_event(
+            salt.utils.batch_output.new_payload(state),
+            salt.utils.batch_output.tag_new(jid),
+        )
+        return {
+            "enc": "clear",
+            "load": {"jid": jid, "minions": minions, "missing": missing},
         }
 
     def _prep_auth_info(self, clear_load):
