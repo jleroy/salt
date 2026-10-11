@@ -150,24 +150,33 @@ def test_default_worker_pool_uses_configured_tcp_port(port, pool_name):
     assert server.get_worker_uri(pool_name) == f"tcp://127.0.0.1:{port}"
 
 
-def test_named_worker_pool_keeps_tcp_offset():
-    """Non-default pools retain their existing deterministic TCP endpoints."""
-    server = salt.transport.zeromq.RequestServer(
-        {"ipc_mode": "tcp", "tcp_master_workers": 4515}
-    )
-    assert server.get_worker_uri("auth") == "tcp://127.0.0.1:5294"
+@pytest.mark.parametrize("port", [4515, 65055, 65534, 65535])
+def test_named_worker_pools_use_distinct_valid_ports(port):
+    """Custom pools must have distinct endpoints even near the TCP port limit."""
+    names = ["default", "fast", "general", "auth", "custom-one", "custom-two"]
+    pools = {name: {"worker_count": 1, "commands": []} for name in names}
+    opts = {"ipc_mode": "tcp", "tcp_master_workers": port, "worker_pools": pools}
+    server = salt.transport.zeromq.RequestServer(opts)
+    uris = {name: server.get_worker_uri(name) for name in names}
+    assert len(set(uris.values())) == len(names)
+    assert uris["default"] == f"tcp://127.0.0.1:{port}"
+    assert all(1 <= int(uri.rsplit(":", 1)[1]) <= 65535 for uri in uris.values())
+    # Worker processes must agree with the router regardless of dictionary order.
+    for name in names:
+        worker = salt.transport.zeromq.RequestServer(
+            dict(opts, pool_name=name, worker_pools=dict(reversed(list(pools.items()))))
+        )
+        assert worker.get_worker_uri() == uris[name]
 
 
-@pytest.mark.parametrize(
-    "port,pool_name", [(0, "default"), (65536, "default"), (65055, "auth")]
-)
-def test_worker_pool_rejects_invalid_tcp_port(port, pool_name):
-    """Reject invalid endpoints, including overflow caused by a pool offset."""
+@pytest.mark.parametrize("port", [0, 65536])
+def test_worker_pool_rejects_invalid_tcp_port(port):
+    """Reject an invalid configured base port before assigning pool endpoints."""
     server = salt.transport.zeromq.RequestServer(
         {"ipc_mode": "tcp", "tcp_master_workers": port}
     )
     with pytest.raises(ValueError, match="Invalid TCP worker port.*tcp_master_workers"):
-        server.get_worker_uri(pool_name)
+        server.get_worker_uri("default")
 
 
 @pytest.mark.parametrize(
