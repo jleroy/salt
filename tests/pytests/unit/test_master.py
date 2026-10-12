@@ -449,6 +449,7 @@ def test_clear_funcs_black(master_opts):
         "__sizeof__",
         "__str__",
         "__subclasshook__",
+        "_handoff_batch",
         "_prep_auth_info",
         "_prep_jid",
         "_prep_pub",
