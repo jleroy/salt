@@ -151,11 +151,17 @@ def test_default_worker_pool_uses_configured_tcp_port(port, pool_name):
 
 
 @pytest.mark.parametrize("port", [4515, 65055, 65534, 65535])
-def test_named_worker_pools_use_distinct_valid_ports(port):
+@pytest.mark.parametrize("routing_enabled", [False, True])
+def test_named_worker_pools_use_distinct_valid_ports(port, routing_enabled):
     """Custom pools must have distinct endpoints even near the TCP port limit."""
     names = ["default", "fast", "general", "auth", "custom-one", "custom-two"]
     pools = {name: {"worker_count": 1, "commands": []} for name in names}
-    opts = {"ipc_mode": "tcp", "tcp_master_workers": port, "worker_pools": pools}
+    opts = {
+        "ipc_mode": "tcp",
+        "tcp_master_workers": port,
+        "worker_pools": pools,
+        "worker_pools_enabled": routing_enabled,
+    }
     server = salt.transport.zeromq.RequestServer(opts)
     uris = {name: server.get_worker_uri(name) for name in names}
     assert len(set(uris.values())) == len(names)

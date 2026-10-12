@@ -186,6 +186,7 @@ class ReqServerChannel:
                 # Wrap the standard transport in the routing channel
                 external_opts = opts.copy()
                 external_opts["worker_pools_enabled"] = False
+                external_opts["worker_pools"] = worker_pools
                 import salt.transport.base
 
                 transport = salt.transport.base.request_server(external_opts, **kwargs)
@@ -918,6 +919,7 @@ class PoolRoutingChannel:
             pool_opts["pool_name"] = pool_name
             # Disable worker pools for internal routing to avoid circular dependency
             pool_opts["worker_pools_enabled"] = False
+            pool_opts["worker_pools"] = self.worker_pools
 
             # Configure IPC for this pool
             if pool_opts.get("ipc_mode") == "tcp":

@@ -959,8 +959,12 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
                     "check tcp_master_workers (port must be between 1 and 65535)"
                 )
             if pool_name and pool_name != "default":
+                # Internal transports disable pool routing to avoid recursion,
+                # but still need the full pool layout to agree on TCP ports.
                 pools = (
-                    salt.config.worker_pools.get_worker_pools_config(self.opts) or {}
+                    self.opts.get("worker_pools")
+                    or salt.config.worker_pools.get_worker_pools_config(self.opts)
+                    or {}
                 )
                 names = sorted(name for name in pools if name != "default")
                 if pool_name not in names:
