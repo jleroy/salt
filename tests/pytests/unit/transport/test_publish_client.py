@@ -11,6 +11,7 @@ import time
 import aiohttp
 import pytest
 import tornado.ioloop
+from pytestshellutils.utils.ports import get_unused_localhost_port
 
 import salt.crypt
 import salt.transport.tcp
@@ -195,106 +196,125 @@ async def test_publish_client_connect_server_down(transport, io_loop):
 async def test_publish_client_connect_server_comes_up(transport, io_loop):
     opts = {"master_ip": "127.0.0.1"}
     host = "127.0.0.1"
-    port = 11122
+    port = get_unused_localhost_port()
     msg = salt.payload.dumps({"meh": 123})
-    if transport == "zeromq":
-        import zmq
+    client = sock = conn = ctx = runner = connect_task = task = None
+    try:
+        if transport == "zeromq":
+            import zmq
 
-        ctx = zmq.asyncio.Context()
-        uri = f"tcp://{opts['master_ip']}:{port}"
-        log.debug("TEST - Senging %r", msg)
-        client = salt.transport.zeromq.PublishClient(
-            opts, io_loop, host=host, port=port
-        )
-        await client.connect()
-        assert client._socket
+            ctx = zmq.asyncio.Context()
+            uri = f"tcp://{opts['master_ip']}:{port}"
+            log.debug("TEST - Senging %r", msg)
+            client = salt.transport.zeromq.PublishClient(
+                opts, io_loop, host=host, port=port
+            )
+            await client.connect()
+            assert client._socket
 
-        sock = ctx.socket(zmq.PUB)
-        sock.setsockopt(zmq.BACKLOG, 1000)
-        sock.setsockopt(zmq.LINGER, -1)
-        sock.setsockopt(zmq.SNDHWM, 1000)
-        sock.bind(uri)
-        await asyncio.sleep(20)
+            sock = ctx.socket(zmq.PUB)
+            sock.setsockopt(zmq.BACKLOG, 1000)
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.setsockopt(zmq.SNDHWM, 1000)
+            sock.bind(uri)
+            await asyncio.sleep(20)
 
-        async def recv():
-            return await client.recv(timeout=1)
+            async def recv():
+                return await client.recv(timeout=1)
 
-        task = asyncio.create_task(recv())
-        # Sleep to allow zmq to do it's thing.
-        await sock.send(msg)
+            task = asyncio.create_task(recv())
+            # Sleep to allow zmq to do it's thing.
+            await sock.send(msg)
+            await asyncio.sleep(0.03)
+            await task
+            response = task.result()
+            assert response
+        elif transport == "tcp":
+            client = salt.transport.tcp.PublishClient(
+                opts, io_loop, host=host, port=port
+            )
+            connect_task = asyncio.create_task(client.connect(timeout=120))
+            assert client._stream is None
+            await asyncio.sleep(2)
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setblocking(0)
+            sock.bind((opts["master_ip"], port))
+            sock.listen(128)
+            await asyncio.sleep(0.03)
+
+            msg = salt.payload.dumps({"meh": 123})
+            _msg = salt.transport.frame.frame_msg(msg, header=None)
+
+            # This loop and timeout is needed to reliably run this test on windows.
+            start = time.monotonic()
+            while True:
+                try:
+                    conn, addr = sock.accept()
+                except BlockingIOError:
+                    await asyncio.sleep(0.3)
+                    if time.monotonic() - start > 30:
+                        raise TimeoutError("No connection after 30 seconds")
+                else:
+                    break
+
+            # Accepting a connection does not mean connect() has assigned the
+            # client stream yet. Otherwise recv() can open a second connection.
+            await connect_task
+            conn.sendall(_msg)
+            response = await client.recv()
+            assert msg == response
+        elif transport == "ws":
+            client = salt.transport.ws.PublishClient(
+                opts, io_loop, host=host, port=port
+            )
+            connect_task = asyncio.create_task(client.connect())
+            assert client._ws is None
+            assert client._session is None
+            await asyncio.sleep(2)
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setblocking(0)
+            sock.bind((opts["master_ip"], port))
+            sock.listen(128)
+
+            async def handler(request):
+                ws = aiohttp.web.WebSocketResponse()
+                await ws.prepare(request)
+                data = salt.payload.dumps(msg)
+                await ws.send_bytes(data)
+
+            server = aiohttp.web.Server(handler)
+            runner = aiohttp.web.ServerRunner(server)
+            await runner.setup()
+            site = aiohttp.web.SockSite(runner, sock)
+            await site.start()
+            await connect_task
+
+            await asyncio.sleep(0.03)
+            response = await client.recv()
+            assert msg == response
+        else:
+            raise Exception(f"Unknown transport {transport}")
+    finally:
+        for pending in (connect_task, task):
+            if pending is not None:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+        if client is not None:
+            client.close()
+        if conn is not None:
+            conn.close()
+        if runner is not None:
+            await runner.cleanup()
+        if sock is not None:
+            sock.close()
+        # Allow the clients' asynchronous cleanup callbacks to finish.
         await asyncio.sleep(0.03)
-        await task
-        response = task.result()
-        assert response
-        client.close()
-        sock.close()
-        await asyncio.sleep(0.03)
-        ctx.term()
-    elif transport == "tcp":
-        client = salt.transport.tcp.PublishClient(opts, io_loop, host=host, port=port)
-        # XXX: This is an implimentation detail of the tcp transport.
-        # await client.connect(port)
-        io_loop.spawn_callback(client.connect, timeout=120)
-        assert client._stream is None
-        await asyncio.sleep(2)
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.setblocking(0)
-        sock.bind((opts["master_ip"], port))
-        sock.listen(128)
-        await asyncio.sleep(0.03)
-
-        msg = salt.payload.dumps({"meh": 123})
-        _msg = salt.transport.frame.frame_msg(msg, header=None)
-
-        # This loop and timeout is needed to reliably run this test on windows.
-        start = time.monotonic()
-        while True:
-            try:
-                conn, addr = sock.accept()
-            except BlockingIOError:
-                await asyncio.sleep(0.3)
-                if time.monotonic() - start > 30:
-                    raise TimeoutError("No connection after 30 seconds")
-            else:
-                break
-
-        conn.send(_msg)
-        response = await client.recv()
-        assert msg == response
-    elif transport == "ws":
-        client = salt.transport.ws.PublishClient(opts, io_loop, host=host, port=port)
-        io_loop.spawn_callback(client.connect)
-        assert client._ws is None
-        assert client._session is None
-        await asyncio.sleep(2)
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.setblocking(0)
-        sock.bind((opts["master_ip"], port))
-        sock.listen(128)
-
-        async def handler(request):
-            ws = aiohttp.web.WebSocketResponse()
-            await ws.prepare(request)
-            data = salt.payload.dumps(msg)
-            await ws.send_bytes(data)
-
-        server = aiohttp.web.Server(handler)
-        runner = aiohttp.web.ServerRunner(server)
-        await runner.setup()
-        site = aiohttp.web.SockSite(runner, sock)
-        await site.start()
-
-        await asyncio.sleep(0.03)
-        response = await client.recv()
-        assert msg == response
-    else:
-        raise Exception(f"Unknown transport {transport}")
-    client.close()
-    await asyncio.sleep(0.03)
+        if ctx is not None:
+            ctx.term()
 
 
 async def test_recv_timeout_zero():
