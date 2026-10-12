@@ -4,11 +4,14 @@ import time
 import pytest
 
 from tests.support.case import ModuleCase
-from tests.support.runtests import RUNTIME_VARS
 
 
 @pytest.mark.windows_whitelisted
 class LoaderOverridesTest(ModuleCase):
+    @pytest.fixture(autouse=True)
+    def configure_minion_cache(self, salt_minion_factory):
+        self.minion_cachedir = salt_minion_factory.config["cachedir"]
+
     def setUp(self):
         self.run_function("saltutil.sync_modules")
 
@@ -20,19 +23,16 @@ class LoaderOverridesTest(ModuleCase):
         # trying to list all functions. This test may execute before the
         # minion has finished syncing down the files it needs.
         module = os.path.join(
-            RUNTIME_VARS.TMP,
-            "rootdir",
-            "cache",
+            self.minion_cachedir,
             "files",
             "base",
             "_modules",
             "override_test.py",
         )
-        tries = 0
-        while not os.path.exists(module):
-            tries += 1
-            if tries > 60:
-                break
+        deadline = time.monotonic() + 60
+        while not os.path.isfile(module):
+            if time.monotonic() >= deadline:
+                self.fail(f"Module was not synchronized within 60 seconds: {module}")
             time.sleep(1)
 
         funcs = self.run_function("sys.list_functions")
