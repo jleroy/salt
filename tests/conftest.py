@@ -958,6 +958,30 @@ def groups_collection_modifyitems(config, items):
 
 
 # ----- Fixtures Overrides ------------------------------------------------------------------------------------------>
+@pytest.fixture(scope="session", autouse=True)
+def worker_pool_ports():
+    """Reserve hash-derived worker ports for test masters using TCP IPC."""
+
+    from pytestshellutils.utils import ports
+    from saltfactories.daemons.master import SaltMaster
+
+    from tests.support.worker_ports import WorkerPortAllocator
+
+    allocator = WorkerPortAllocator(ports.get_unused_localhost_port)
+    default_config = SaltMaster.default_config.__func__
+
+    def master_config(cls, *args, **kwargs):
+        config = default_config(cls, *args, **kwargs)
+        return allocator.configure_master(config)
+
+    # Checking only the base port misses the hash offsets used by worker pools.
+    # Track every allocation so later minions cannot reuse a pool's endpoint.
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(ports, "get_unused_localhost_port", allocator.unused_port)
+        patcher.setattr(SaltMaster, "default_config", classmethod(master_config))
+        yield
+
+
 @pytest.fixture(scope="session")
 def salt_factories_default_root_dir(salt_factories_default_root_dir):
     """
