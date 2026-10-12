@@ -4,6 +4,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import time
 
 import packaging.version
 import pytest
@@ -580,6 +581,42 @@ def salt_call_cli(salt_minion):
 @pytest.fixture(scope="session")
 def pkg_tests_account():
     with pytest.helpers.create_account() as account:
+        # On macOS, account creation is verified through dscl, while user.info
+        # enumerates pwd.getpwall() and cmd.run(runas=...) uses pwd.getpwnam().
+        # A successful dscl lookup does not guarantee that both pwd lookups
+        # can resolve the account yet. Wait for matching UID, GID and home
+        # directory before yielding it, so tests do not receive empty account
+        # information or fail to execute commands as the newly created user.
+        if platform.is_darwin():
+            import pwd
+
+            deadline = time.monotonic() + 30
+            while True:
+                info = account.sminion.functions.user.info(account.username)
+                try:
+                    entry = pwd.getpwnam(account.username)
+                except KeyError:
+                    entry = None
+                if (
+                    entry is not None
+                    and info.get("uid") == entry.pw_uid
+                    and info.get("gid") == entry.pw_gid
+                    and info.get("home") == entry.pw_dir
+                ):
+                    break
+                if time.monotonic() >= deadline:
+                    log.error(
+                        "Account %s is not consistently visible after 30s: "
+                        "user.info=%r, pwd.getpwnam=%r",
+                        account.username,
+                        info,
+                        entry,
+                    )
+                    pytest.fail(
+                        f"Account {account.username!r} is not consistently visible "
+                        "through user.info and pwd.getpwnam after 30s"
+                    )
+                time.sleep(3)
         yield account
 
 
