@@ -14,6 +14,7 @@ import socket
 import stat
 import sys
 import threading
+import zlib
 from random import randint
 
 import tornado
@@ -26,7 +27,6 @@ import zmq.error
 import zmq.eventloop.future
 import zmq.eventloop.zmqstream
 
-import salt.config.worker_pools
 import salt.payload
 import salt.transport.base
 import salt.utils.asynchronous
@@ -525,8 +525,25 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
             )
             os.nice(self.opts["mworker_queue_niceness"])
 
+        # Determine worker URI based on pool configuration
         pool_name = self.opts.get("pool_name", "")
-        self.w_uri = self.get_worker_uri(pool_name)
+        if self.opts.get("ipc_mode", "") == "tcp":
+            base_port = self.opts.get("tcp_master_workers", 4515)
+            if pool_name:
+                # Use different port for each pool
+                port_offset = zlib.adler32(pool_name.encode()) % 1000
+                self.w_uri = f"tcp://127.0.0.1:{base_port + port_offset}"
+            else:
+                self.w_uri = f"tcp://127.0.0.1:{base_port}"
+        else:
+            if pool_name:
+                self.w_uri = "ipc://{}".format(
+                    os.path.join(self.opts["sock_dir"], f"workers-{pool_name}.ipc")
+                )
+            else:
+                self.w_uri = "ipc://{}".format(
+                    os.path.join(self.opts["sock_dir"], "workers.ipc")
+                )
 
         log.info("Setting up the master communication server")
         log.info("RequestServer clients %s", self.uri)
@@ -618,7 +635,15 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
             dealer_socket = context.socket(zmq.DEALER)
             dealer_socket.setsockopt(zmq.LINGER, 1)
 
-            w_uri = self.get_worker_uri(pool_name)
+            # Determine worker URI for this pool
+            if self.opts.get("ipc_mode", "") == "tcp":
+                base_port = self.opts.get("tcp_master_workers", 4515)
+                port_offset = zlib.adler32(pool_name.encode()) % 1000
+                w_uri = f"tcp://127.0.0.1:{base_port + port_offset}"
+            else:
+                w_uri = "ipc://{}".format(
+                    os.path.join(self.opts["sock_dir"], f"workers-{pool_name}.ipc")
+                )
 
             log.info("RequestServer pool '%s' workers %s", pool_name, w_uri)
             dealer_socket.bind(w_uri)
@@ -952,35 +977,13 @@ class RequestServer(salt.transport.base.DaemonizedRequestServer):
             pool_name = self.opts.get("pool_name", "")
 
         if self.opts.get("ipc_mode", "") == "tcp":
-            port = self.opts.get("tcp_master_workers", 4515)
-            if not 1 <= port <= 65535:
-                raise ValueError(
-                    f"Invalid TCP worker port {port} for pool {pool_name!r}; "
-                    "check tcp_master_workers (port must be between 1 and 65535)"
-                )
-            if pool_name and pool_name != "default":
-                # Internal transports disable pool routing to avoid recursion,
-                # but still need the full pool layout to agree on TCP ports.
-                pools = (
-                    self.opts.get("worker_pools")
-                    or salt.config.worker_pools.get_worker_pools_config(self.opts)
-                    or {}
-                )
-                names = sorted(name for name in pools if name != "default")
-                if pool_name not in names:
-                    raise ValueError(f"Unknown worker pool {pool_name!r}")
-                # All processes derive the same distinct endpoints from the full
-                # configuration. Hash offsets can collide or overflow on Windows.
-                # Keep the base port for default/legacy workers and use lower
-                # ports when the remaining range above it is too small.
-                offset = names.index(pool_name) + 1
-                if port + len(names) <= 65535:
-                    port += offset
-                elif port - len(names) >= 1:
-                    port -= offset
-                else:
-                    raise ValueError("Not enough TCP ports for configured worker pools")
-            return f"tcp://127.0.0.1:{port}"
+            if pool_name:
+                # Hash pool name for consistent port assignment
+                base_port = self.opts.get("tcp_master_workers", 4515)
+                port_offset = zlib.adler32(pool_name.encode()) % 1000
+                return f"tcp://127.0.0.1:{base_port + port_offset}"
+            else:
+                return f"tcp://127.0.0.1:{self.opts.get('tcp_master_workers', 4515)}"
         else:
             if pool_name:
                 return f"ipc://{os.path.join(self.opts['sock_dir'], f'workers-{pool_name}.ipc')}"

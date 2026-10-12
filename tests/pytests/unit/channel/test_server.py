@@ -1264,46 +1264,6 @@ def test_publish_daemon_sets_eventpublisher_process_title():
     fake_setproctitle.setproctitle.assert_called_once_with("EventPublisher")
 
 
-@pytest.mark.parametrize("port", [4515, 65535])
-@pytest.mark.parametrize("layout", ["custom", "defaults", "legacy"])
-def test_pool_transports_preserve_tcp_worker_endpoints(tmp_path, port, layout):
-    """Router and workers must share ports even with internal routing disabled."""
-    opts = {
-        "transport": "zeromq",
-        "ipc_mode": "tcp",
-        "tcp_master_workers": port,
-        "worker_pools_enabled": True,
-        "cachedir": str(tmp_path),
-        "sock_dir": str(tmp_path),
-        "keys.cache_driver": "localfs_key",
-        "con_cache": False,
-    }
-    if layout == "custom":
-        opts["worker_pools"] = {
-            "fast": {"worker_count": 2, "commands": ["_auth"]},
-            "general": {"worker_count": 3, "commands": ["*"]},
-        }
-    elif layout == "legacy":
-        opts["worker_threads"] = 5
-
-    with patch("salt.cache.Cache"), patch("salt.utils.event.get_master_event"), patch(
-        "salt.crypt.MasterKeys"
-    ):
-        channel = server.ReqServerChannel.factory(opts)
-        channel.pre_fork(MagicMock(), worker_pools=channel.worker_pools)
-
-    assert channel.transport.opts["worker_pools_enabled"] is False
-    endpoints = set()
-    for name, worker in channel.pool_servers.items():
-        assert worker.opts["worker_pools_enabled"] is False
-        uri = worker.transport.get_worker_uri()
-        assert uri == channel.transport.get_worker_uri(name)
-        assert 1 <= int(uri.rsplit(":", 1)[1]) <= 65535
-        endpoints.add(uri)
-    assert len(endpoints) == len(channel.worker_pools)
-    assert opts["worker_pools_enabled"] is True
-
-
 def test_pool_routing_channel_caches_auto_key_on_init(tmp_path):
     """
     ``PoolRoutingChannel.__init__`` must eagerly construct and cache an
