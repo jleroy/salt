@@ -1,5 +1,3 @@
-import base64
-import hashlib
 import os
 import zipfile
 
@@ -30,54 +28,6 @@ def _onedir_extras_dir():
     return matches[0]
 
 
-def _build_wheel(dest_dir, name, version, requires=()):
-    """
-    Hand-build a minimal, valid, pure-Python wheel using only the stdlib
-    (no setuptools/build backend, no network access) so tests can install
-    a disposable fake package via salt-pip.
-    """
-    dist_info = f"{name}-{version}.dist-info"
-    wheel_path = dest_dir / f"{name}-{version}-py3-none-any.whl"
-
-    metadata_lines = [
-        "Metadata-Version: 2.1",
-        f"Name: {name}",
-        f"Version: {version}",
-    ]
-    for req in requires:
-        metadata_lines.append(f"Requires-Dist: {req}")
-    metadata = "\n".join(metadata_lines) + "\n"
-
-    wheel_metadata = (
-        "Wheel-Version: 1.0\n"
-        "Generator: salt-test-suite\n"
-        "Root-Is-Purelib: true\n"
-        "Tag: py3-none-any\n"
-    )
-
-    files = {
-        f"{name}/__init__.py": "# test fixture package\n",
-        f"{dist_info}/METADATA": metadata,
-        f"{dist_info}/WHEEL": wheel_metadata,
-    }
-
-    record_lines = []
-    for path, content in files.items():
-        data = content.encode("utf-8")
-        digest = "sha256=" + base64.urlsafe_b64encode(
-            hashlib.sha256(data).digest()
-        ).rstrip(b"=").decode("ascii")
-        record_lines.append(f"{path},{digest},{len(data)}")
-    record_lines.append(f"{dist_info}/RECORD,,")
-
-    with zipfile.ZipFile(wheel_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path, content in files.items():
-            zf.writestr(path, content)
-        zf.writestr(f"{dist_info}/RECORD", "\n".join(record_lines) + "\n")
-
-    return wheel_path
-
-
 def test_within_onedir_env(shell):
     if os.environ.get("ONEDIR_TESTRUN", "0") == "0":
         return
@@ -97,7 +47,7 @@ def test_outside_onedir_env(capsys):
     assert "'salt-pip' is only meant to be used from a Salt onedir." in captured.err
 
 
-def test_extension_dependency_already_bundled_is_not_duplicated(shell, tmp_path):
+def test_extension_dependency_already_bundled_is_not_duplicated(shell, build_wheel):
     """
     Installing a salt extension whose dependency (jinja2, which Salt
     itself depends on) is already present in the onedir's own
@@ -114,7 +64,7 @@ def test_extension_dependency_already_bundled_is_not_duplicated(shell, tmp_path)
     script_path = _onedir_script_path()
     assert script_path.exists()
 
-    wheel_path = _build_wheel(tmp_path, "faketestext", "0.1.0", requires=["jinja2"])
+    wheel_path = build_wheel("faketestext", "0.1.0", requires=["jinja2"])
 
     try:
         ret = shell.run(str(script_path), "install", str(wheel_path))
@@ -129,7 +79,7 @@ def test_extension_dependency_already_bundled_is_not_duplicated(shell, tmp_path)
         shell.run(str(script_path), "uninstall", "-y", "faketestext")
 
 
-def test_no_system_python_leakage(shell, tmp_path):
+def test_no_system_python_leakage(shell, tmp_path, build_wheel):
     """
     salt-pip must not see or touch packages belonging to an unrelated
     ("system") Python installation, even when PYTHONPATH points at it and
@@ -146,7 +96,7 @@ def test_no_system_python_leakage(shell, tmp_path):
     fake_system_site_packages = tmp_path / "fake-system-site-packages"
     fake_system_site_packages.mkdir()
 
-    old_wheel = _build_wheel(tmp_path, "fakesyspkg", "1.0")
+    old_wheel = build_wheel("fakesyspkg", "1.0")
     with zipfile.ZipFile(old_wheel) as zf:
         zf.extractall(fake_system_site_packages)
 
@@ -156,7 +106,7 @@ def test_no_system_python_leakage(shell, tmp_path):
         if path.is_file()
     }
 
-    new_wheel = _build_wheel(tmp_path, "fakesyspkg", "2.0")
+    new_wheel = build_wheel("fakesyspkg", "2.0")
 
     try:
         ret = shell.run(

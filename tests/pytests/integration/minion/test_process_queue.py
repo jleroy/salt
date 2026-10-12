@@ -1,14 +1,15 @@
 import pathlib
+import shlex
 import subprocess
 import sys
 import textwrap
 import time
 
-import psutil
 import pytest
 import yaml
 
 import salt.utils.files
+import salt.utils.state
 
 
 @pytest.fixture(scope="module")
@@ -90,69 +91,85 @@ def run_salt_cmd(salt_cli, configured_minion):
 
 
 @pytest.mark.slow_test
-def test_process_queue_basic(salt_cli, configured_minion, run_salt_cmd, tmp_path):
-    """
-    Test that jobs are queued when process_count_max is reached.
-    Config: process_count_max = 2
-    """
-    # Verify config on disk
+def test_process_queue_basic(
+    salt_cli, salt_master, configured_minion, run_salt_cmd, tmp_path, event_listener
+):
+    """Keep both process slots occupied until a third job is queued, then release them."""
     with salt.utils.files.fopen(configured_minion.config_file) as f:
         cfg = yaml.safe_load(f)
         assert cfg.get("process_count_max") == 2
 
-    # 1. Start 2 long-running jobs to fill the slots
-    p1 = run_salt_cmd("cmd.run", ["sleep 6"], background=True)
-    p2 = run_salt_cmd("cmd.run", ["sleep 6"], background=True)
-
-    time.sleep(2)
-
-    # Verify they are running
-    minion_proc = psutil.Process(configured_minion.pid)
-    start_wait = time.time()
-    while time.time() - start_wait < 10:
-        try:
-            children = minion_proc.children(recursive=True)
-            sleep_jobs = [p for p in children if "sleep" in " ".join(p.cmdline())]
-            if len(sleep_jobs) >= 2:
-                break
-        except psutil.NoSuchProcess:
-            pass
-        time.sleep(0.5)
-
-    try:
-        children = minion_proc.children(recursive=True)
-        sleep_jobs = [p for p in children if "sleep" in " ".join(p.cmdline())]
-    except psutil.NoSuchProcess:
-        sleep_jobs = []
-
-    assert len(sleep_jobs) >= 2, f"Found only {len(sleep_jobs)} sleep jobs"
-
-    # 2. Start a 3rd job (marker file) - Should be queued
+    release = tmp_path / "release"
+    started = [tmp_path / f"job{i}.started" for i in range(2)]
     marker = tmp_path / "job3.txt"
-    start_time = time.time()
-    p3 = run_salt_cmd("cmd.run", [f"touch {marker}"], background=True)
+    processes = []
+    try:
+        # Fixed sleeps can finish before both jobs start on slow CI runners.
+        # Hold both slots until the test explicitly releases them instead.
+        for path in started:
+            command = (
+                f"touch {shlex.quote(str(path))}; "
+                f"while [ ! -f {shlex.quote(str(release))} ]; do sleep 0.1; done"
+            )
+            processes.append(
+                run_salt_cmd("cmd.run", [command], timeout=120, background=True)
+            )
 
-    # 3. Check if it ran immediately
-    time.sleep(1)
-    assert not marker.exists(), "Job 3 ran immediately despite process_count_max limit!"
+        deadline = time.monotonic() + 60
+        while not all(path.exists() for path in started):
+            assert time.monotonic() < deadline, "Both blocking jobs did not start"
+            time.sleep(0.1)
 
-    # 4. Wait for p1/p2 to finish
-    p1.wait()
-    p2.wait()
+        start_time = time.time()
+        ret = salt_cli.run(
+            "cmd.run",
+            f"touch {shlex.quote(str(marker))}",
+            "--async",
+            minion_tgt=configured_minion.id,
+        )
+        assert ret.returncode == 0, ret
+        jid = ret.stdout.strip().split()[-1]
+        assert jid.isdigit(), ret
 
-    # 5. Wait for p3 to finish
-    p3.wait()
-    end_time = time.time()
+        # Observe the third job in the minion queue before releasing a slot;
+        # absence of its marker alone could just mean delayed publication.
+        queue_dir = pathlib.Path(
+            salt.utils.state.job_queue_dir(configured_minion.config)
+        )
+        deadline = time.monotonic() + 30
+        while not list(queue_dir.glob(f"queued_*_{jid}.p")):
+            assert not marker.exists(), "Job 3 bypassed the process limit"
+            assert time.monotonic() < deadline, "Job 3 was not queued"
+            time.sleep(0.1)
+        assert not marker.exists(), "Job 3 ran while both slots were occupied"
 
-    timeout = 15
-    start_wait = time.time()
-    while not marker.exists() and time.time() - start_wait < timeout:
-        time.sleep(0.5)
+        release.touch()
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=30)
+            assert process.returncode == 0, (stdout, stderr)
 
-    assert marker.exists(), "Job 3 did not execute after queueing"
-
-    duration = end_time - start_time
-    assert duration > 3, f"Job 3 returned too quickly ({duration}s)"
+        matched_events = event_listener.wait_for_events(
+            [(salt_master.id, f"salt/job/{jid}/ret/{configured_minion.id}")],
+            after_time=start_time,
+            timeout=30,
+        )
+        assert matched_events.found_all_events, matched_events
+        event = next(iter(matched_events.matches))
+        assert event.data["success"], event.data
+        assert event.data["retcode"] == 0, event.data
+        assert marker.exists(), "Job 3 did not execute after queueing"
+    finally:
+        release.touch()
+        for process in processes:
+            try:
+                process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
 
 
 @pytest.mark.slow_test

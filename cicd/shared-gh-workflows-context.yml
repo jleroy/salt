@@ -13,10 +13,13 @@ pr-testrun-slugs:
   - windows-2025
   - windows-2025-nsis-pkg
   - windows-2025-msi-pkg
-  - macos-15
-  - macos-15-pkg
+  - macos-27
+  - macos-27-pkg
+
+# Test run slugs for full testing (all platforms)
 full-testrun-slugs:
   - all
+
 test-salt-listing:
   linux:
     - slug: rockylinux-8
@@ -142,15 +145,15 @@ test-salt-listing:
       container: "ghcr.io/saltstack/salt-ci-containers/testing:ubuntu-24.04"
       enabled: false
   macos:
-    - slug: macos-15-intel
-      display_name: "macOS 15 (Intel)"
+    - slug: macos-26-intel
+      display_name: "macOS 26 (Intel)"
       arch: x86_64
-      runner: macos-15-intel
+      runner: macos-26-intel
       enabled: true
-    - slug: macos-15
-      display_name: "macOS 15 (M1)"
+    - slug: macos-27
+      display_name: "macOS 27 (M1)"
       arch: arm64
-      runner: macos-15
+      runner: xcode-27
       enabled: true
   windows:
     - slug: windows-2022
@@ -286,15 +289,15 @@ test-salt-pkg-listing:
       container: "ghcr.io/saltstack/salt-ci-containers/testing:ubuntu-24.04"
       enabled: false
   macos:
-    - slug: macos-15-intel-pkg
-      display_name: "macOS 15 (Intel)"
+    - slug: macos-26-intel-pkg
+      display_name: "macOS 26 (Intel)"
       arch: x86_64
-      runner: macos-15-intel
+      runner: macos-26-intel
       enabled: true
-    - slug: macos-15-pkg
-      display_name: "macOS 15 (M1)"
+    - slug: macos-27-pkg
+      display_name: "macOS 27 (M1)"
       arch: arm64
-      runner: macos-15
+      runner: xcode-27
       enabled: true
   windows:
     - slug: windows-2022-nsis-pkg

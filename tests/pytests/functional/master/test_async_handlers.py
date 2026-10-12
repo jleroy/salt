@@ -199,28 +199,30 @@ async def test_concurrent_file_list_dispatches_in_parallel(tmp_path):
         aes_funcs.destroy()
 
 
-async def test_fast_handler_stays_responsive_under_load(tmp_path):
-    """A fast handler queued behind N slow blocking handlers must complete
-    promptly — the executor keeps the ioloop unblocked.
+async def test_event_loop_stays_responsive_under_load(tmp_path):
+    """The event loop must run callbacks while fileserver calls are blocked.
 
-    We monkey-patch the fileserver call to sleep, saturate the executor
-    with concurrent slow calls, then dispatch one fast handler
-    (``_master_opts``) and assert its wall-time stays well below the slow
-    call latency.  If the migration accidentally serialized handlers on
-    the ioloop this fast call would queue behind every slow one.
+    A handler using the same executor could queue behind the slow calls
+    without blocking the loop, so probe the loop directly instead.
     """
     file_roots = tmp_path / "srv" / "salt"
     file_roots.mkdir(parents=True)
     opts = _base_opts(tmp_path)
     opts["file_roots"] = {"base": [str(file_roots)]}
     aes_funcs = salt.master.AESFuncs(opts)
+    release = threading.Event()
+    started = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    loop_thread = threading.get_ident()
+    slow_tasks = []
     try:
         worker = _make_worker(aes_funcs)
 
-        slow_sleep = 0.5
-
         def _slow_file_list(load):
-            time.sleep(slow_sleep)
+            # Fail before waiting if offloading regresses, avoiding a deadlock.
+            assert threading.get_ident() != loop_thread
+            loop.call_soon_threadsafe(started.set)
+            assert release.wait(10), "Fileserver call was not released"
             return ["slow-result"]
 
         # Replace only the sync body; the async wrapper still offloads via
@@ -228,8 +230,7 @@ async def test_fast_handler_stays_responsive_under_load(tmp_path):
         # responsiveness under handler load.
         aes_funcs.fs_.file_list = _slow_file_list
 
-        # Fire 8 slow calls concurrently; they saturate the default
-        # executor's worker pool (min 8 for asyncio's default).
+        # Some calls may queue when the executor has fewer than eight threads.
         slow_tasks = [
             asyncio.create_task(
                 worker._handle_aes({"cmd": "_file_list", "saltenv": "base"})
@@ -237,37 +238,26 @@ async def test_fast_handler_stays_responsive_under_load(tmp_path):
             for _ in range(8)
         ]
 
-        # Give the slow tasks a moment to actually enter the executor.
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(started.wait(), timeout=5)
+        callback_ran = loop.create_future()
 
-        # Dispatch a fast handler (`_master_opts` -> `_file_envs` offload,
-        # which is also async but returns almost immediately with an empty
-        # roots tree). Measure only its response time.
-        t0 = time.perf_counter()
-        ret, envelope = await worker._handle_aes(
-            {"cmd": "_master_opts", "id": "quick-minion", "env_only": True}
-        )
-        fast_elapsed = time.perf_counter() - t0
-        log.info(
-            "Fast _master_opts under load: %.3fs (slow_sleep=%.2fs)",
-            fast_elapsed,
-            slow_sleep,
-        )
+        def probe_loop():
+            callback_ran.set_result(
+                not release.is_set() and all(not task.done() for task in slow_tasks)
+            )
 
-        # Loop stayed responsive: fast handler completed well before the
-        # slow calls' sleep.
-        assert fast_elapsed < slow_sleep, (
-            f"Fast handler took {fast_elapsed:.3f}s — longer than a single "
-            f"slow call ({slow_sleep}s). The ioloop appears to be blocked "
-            "by concurrent slow handlers."
-        )
-        assert envelope == {"fun": "send"}
-        assert isinstance(ret, dict)
-
-        # Let the slow tasks finish so the test tears down cleanly.
-        await asyncio.gather(*slow_tasks)
+        loop.call_soon(probe_loop)
+        assert await asyncio.wait_for(
+            callback_ran, timeout=5
+        ), "The callback must run while the slow requests are still pending"
     finally:
-        aes_funcs.destroy()
+        release.set()
+        try:
+            results = await asyncio.gather(*slow_tasks, return_exceptions=True)
+        finally:
+            aes_funcs.destroy()
+
+    assert results == [(["slow-result"], {"fun": "send"})] * 8
 
 
 # ---------------------------------------------------------------------------

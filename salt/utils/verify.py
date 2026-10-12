@@ -344,7 +344,14 @@ def check_user(user):
 
     try:
         if hasattr(os, "initgroups"):
-            os.initgroups(user, pwuser.pw_gid)
+            # os.initgroups() parses the gid as a signed C int, which overflows
+            # for gids that wrap around (e.g. macOS 'nobody' has gid -2, exposed
+            # by pwd as 4294967294). Pass the signed equivalent so it fits; the
+            # kernel still interprets it back as the correct unsigned gid.
+            initgroups_gid = pwuser.pw_gid
+            if initgroups_gid >= 2**31:
+                initgroups_gid -= 2**32
+            os.initgroups(user, initgroups_gid)
         else:
             os.setgroups(salt.utils.user.get_gid_list(user, include_default=False))
         os.setgid(pwuser.pw_gid)

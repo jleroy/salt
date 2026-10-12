@@ -118,18 +118,7 @@ def test_state_show_top(salt_ssh_cli, base_env_state_tree_root_dir):
     with pytest.helpers.temp_file(
         "top.sls", top_sls, base_env_state_tree_root_dir
     ), pytest.helpers.temp_file("core.sls", core_state, base_env_state_tree_root_dir):
-        # Retry to handle a potential race where the master_tops extension
-        # module hasn't been fully loaded yet when the first call is made.
-        # 60s wins on slow ARM64 / FIPS runners where the master takes
-        # longer to discover ``master_tops_test`` from extension_modules.
-        ret = None
-        for _ in range(20):
-            ret = salt_ssh_cli.run("state.show_top")
-            if ret.returncode == 0 and ret.data == {
-                "base": ["core", "master_tops_test"]
-            }:
-                break
-            time.sleep(3)
+        ret = salt_ssh_cli.run("state.show_top")
         assert ret.returncode == 0
         assert ret.data == {"base": ["core", "master_tops_test"]}
 

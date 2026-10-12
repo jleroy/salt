@@ -4,6 +4,18 @@ import salt.engines
 from tests.support.mock import MagicMock, patch
 
 
+@pytest.mark.parametrize("role", ["minion", "master"])
+@pytest.mark.parametrize("config", [{}, {"engines": []}, {"engines": {}}])
+def test_start_engines_without_configuration(role, config):
+    """Starting without engines must not load modules or create processes."""
+    opts = {"__role": role, **config}
+    process_manager = MagicMock()
+    with patch("salt.engines.salt.loader") as loader:
+        salt.engines.start_engines(opts, process_manager)
+    assert not loader.mock_calls
+    process_manager.add_process.assert_not_called()
+
+
 @pytest.fixture
 def kwargs():
     opts = {"__role": "minion"}

@@ -7,6 +7,7 @@ import fnmatch
 import logging
 import os
 import signal
+import threading
 import traceback
 import weakref
 from collections.abc import Mapping, MutableMapping
@@ -612,7 +613,18 @@ class AsyncClientMixin(ClientStateMixin):
                 ),
             )
             proc.start()
-        proc.join()  # MUST join, otherwise we leave zombies all over
+        if salt.utils.platform.spawning_platform():
+            # Spawned children do not daemonize: joining here would wait for the
+            # runner to finish before returning its JID. Reap them independently.
+            def reap_process():
+                proc.join()
+                proc.close()
+
+            threading.Thread(
+                target=reap_process, name=f"Reap-{proc.name}", daemon=True
+            ).start()
+        else:
+            proc.join()  # Reap the intermediate process after it daemonizes.
         return async_pub
 
     def print_async_event(self, suffix, event):

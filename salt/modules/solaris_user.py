@@ -165,7 +165,7 @@ def add(
         return True
 
 
-def delete(name, remove=False, force=False):
+def delete(name, remove=False, force=False, **kwargs):
     """
     Remove a user from the minion
 

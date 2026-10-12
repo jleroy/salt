@@ -1,3 +1,4 @@
+import fnmatch
 import pathlib
 import time
 from types import SimpleNamespace
@@ -5,8 +6,6 @@ from types import SimpleNamespace
 import pytest
 from _pytest.pytester import LineMatcher
 from saltfactories.utils import random_string
-
-import salt.utils.platform
 
 pytestmark = [
     pytest.mark.skip_on_windows(reason="Temporarily skipped on the newer golden images")
@@ -27,35 +26,51 @@ def logging_master(salt_factories):
         overrides=config_overrides,
         extra_cli_arguments_after_first_start_failure=["--log-level=info"],
     )
-    process_pid = None
+    log_file = pathlib.Path(factory.config["log_file"])
     with factory.started("--log-level=debug"):
         process_pid = factory.pid
-        # Wait a little after the master starts
-        if not salt.utils.platform.spawning_platform():
-            time.sleep(2)
-        else:
-            time.sleep(10)
+        matches = [
+            # Each of these is a separate process started by the master.
+            f"*|PID:{process_pid}|*",
+            "*|MWorker-*|*",
+            "*|Maintenance|*",
+            "*|RequestServer|*",
+            "*|PubServerChannel._publish_daemon|*",
+            "*|MWorkerQueue|*",
+            "*|FileserverUpdate|*",
+        ]
+        # Master readiness does not guarantee that spawned workers have
+        # initialized logging. Wait for their records before shutting down.
+        deadline = time.monotonic() + 60
+        while True:
+            lines = (
+                log_file.read_text(encoding="utf-8").splitlines()
+                if log_file.exists()
+                else []
+            )
+            missing = [
+                pattern
+                for pattern in matches
+                if not any(fnmatch.fnmatchcase(line, pattern) for line in lines)
+            ]
+            if not missing:
+                break
+            if time.monotonic() >= deadline:
+                pytest.fail(f"Missing process logs before master shutdown: {missing}")
+            time.sleep(0.1)
 
     ret = factory.terminate()
     return SimpleNamespace(
         process_pid=process_pid,
         ret=ret,
-        log_file=pathlib.Path(factory.config["log_file"]),
+        log_file=log_file,
+        matches=matches,
     )
 
 
 @pytest.fixture(scope="module")
 def matches(logging_master):
-    return [
-        # Each of these is a separate process started by the master
-        f"*|PID:{logging_master.process_pid}|*",
-        "*|MWorker-*|*",
-        "*|Maintenance|*",
-        "*|RequestServer|*",
-        "*|PubServerChannel._publish_daemon|*",
-        "*|MWorkerQueue|*",
-        "*|FileserverUpdate|*",
-    ]
+    return logging_master.matches
 
 
 @pytest.mark.windows_whitelisted

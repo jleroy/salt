@@ -449,6 +449,7 @@ def test_clear_funcs_black(master_opts):
         "__sizeof__",
         "__str__",
         "__subclasshook__",
+        "_handoff_batch",
         "_prep_auth_info",
         "_prep_jid",
         "_prep_pub",
@@ -4329,3 +4330,59 @@ async def test_handle_payload_no_cap_allows_full_concurrency(master_opts):
     )
     assert results == ["ok"] * 8
     assert max_active == 8
+
+
+@pytest.mark.parametrize("authorized", [True, False])
+async def test_async_batch_handoff_requires_authorization(
+    publish_clear_funcs, authorized
+):
+    """Persist only authorized targets, using the authenticated user's identity."""
+    import salt.utils.batch_state
+
+    master = publish_clear_funcs
+    jid = "20261011073527901233"
+    load = {
+        "user": "claimed-user",
+        "fun": "test.ping",
+        "arg": [],
+        "tgt": ["a", "b"],
+        "tgt_type": "list",
+        "kwargs": {
+            "token": "secret",
+            "batch_handoff": {"batch": "1", "user": "root", "token": "secret"},
+        },
+    }
+    with patch("salt.acl.PublisherACL.user_is_blacklisted", return_value=False), patch(
+        "salt.acl.PublisherACL.cmd_is_blacklisted", return_value=False
+    ), patch.object(
+        master.ckminions,
+        "check_minions",
+        return_value={"minions": ["a", "b"], "missing": []},
+    ), patch.object(
+        master.loadauth,
+        "check_authentication",
+        return_value={"auth_list": ["test.ping"], "username": "authenticated-user"},
+    ), patch.object(
+        master.ckminions, "auth_check", return_value=authorized
+    ), patch.object(
+        master, "_prep_jid", return_value=jid
+    ) as prep_jid, patch.object(
+        master, "_prep_pub"
+    ), patch.object(
+        master, "_send_pub"
+    ) as send, patch.object(
+        master.event, "fire_event"
+    ):
+        result = await master.publish(load)
+    send.assert_not_called()
+    if not authorized:
+        assert result["error"]["name"] == "AuthorizationError"
+        prep_jid.assert_not_called()
+        return
+    assert result["load"]["jid"] == jid
+    state = salt.utils.batch_state.read_batch_state(jid, master.opts)
+    assert state["pending"] == ["a", "b"]
+    assert state["active"] == {}
+    assert state["user"] == "authenticated-user"
+    assert "secret" not in repr(state)
+    assert jid in salt.utils.batch_state.read_active_index(master.opts)

@@ -278,71 +278,43 @@ def test_regex(salt_cli, salt_minion, salt_sub_minion):
     assert salt_sub_minion.id in ret.data
 
 
-def test_grain(salt_cli, salt_master, salt_minion, salt_sub_minion):
-    """
-    test salt grain matcher
-    """
-    # Sync grains
+@pytest.fixture(scope="module")
+def synced_grains(salt_cli, salt_minion, salt_sub_minion):
+    """Sync grains once before exercising the individual grain matcher cases."""
     ret = salt_cli.run("saltutil.sync_grains", minion_tgt="*")
     assert ret.returncode == 0
-    # First-level grain (string value)
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="test_grain:cheese")
+
+
+@pytest.mark.usefixtures("synced_grains")
+@pytest.mark.parametrize(
+    "target, expected_minions",
+    [
+        ("test_grain:cheese", ("minion",)),
+        ("test_grain:spam", ("sub_minion",)),
+        ("match:maker", ("minion", "sub_minion")),
+        ("planets:earth", ("minion",)),
+        ("planets:saturn", ("sub_minion",)),
+        ("planets:pluto", ()),
+        ("level1:level2:foo", ("minion",)),
+        ("level1:level2:bar", ("sub_minion",)),
+        ("companions:one:ian", ("minion",)),
+        ("companions:two:jamie", ("sub_minion",)),
+        # Regression coverage for https://github.com/saltstack/salt/issues/19651
+        ("companions:*:susan", ("minion",)),
+        ("companions:one:*", ("minion",)),
+        ("companions:*:*", ("minion", "sub_minion")),
+    ],
+    ids=lambda value: value if isinstance(value, str) else None,
+)
+def test_grain(salt_cli, salt_minion, salt_sub_minion, target, expected_minions):
+    """Check each grain target independently so CLI runtimes do not accumulate."""
+    ret = salt_cli.run("-G", "test.ping", minion_tgt=target)
+    if not expected_minions:
+        assert ret.returncode == 2  # No match
+        return
     assert ret.returncode == 0
-    assert salt_minion.id in ret.data
-    assert salt_sub_minion.id not in ret.data
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="test_grain:spam")
-    assert ret.returncode == 0
-    assert salt_sub_minion.id in ret.data
-    assert salt_minion.id not in ret.data
-    # Custom grain
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="match:maker")
-    assert ret.returncode == 0
-    assert salt_minion.id in ret.data
-    assert salt_sub_minion.id in ret.data
-    # First-level grain (list member)
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="planets:earth")
-    assert ret.returncode == 0
-    assert salt_minion.id in ret.data
-    assert salt_sub_minion.id not in ret.data
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="planets:saturn")
-    assert ret.returncode == 0
-    assert salt_sub_minion.id in ret.data
-    assert salt_minion.id not in ret.data
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="planets:pluto")
-    assert ret.returncode == 2  # No match
-    # Nested grain (string value)
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="level1:level2:foo")
-    assert ret.returncode == 0
-    assert salt_minion.id in ret.data
-    assert salt_sub_minion.id not in ret.data
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="level1:level2:bar")
-    assert ret.returncode == 0
-    assert salt_sub_minion.id in ret.data
-    assert salt_minion.id not in ret.data
-    # Nested grain (list member)
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="companions:one:ian")
-    assert ret.returncode == 0
-    assert salt_minion.id in ret.data
-    assert salt_sub_minion.id not in ret.data
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="companions:two:jamie")
-    assert ret.returncode == 0
-    assert salt_sub_minion.id in ret.data
-    assert salt_minion.id not in ret.data
-    # Test for issue: https://github.com/saltstack/salt/issues/19651
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="companions:*:susan")
-    assert ret.returncode == 0
-    assert salt_minion.id in ret.data
-    assert salt_sub_minion.id not in ret.data
-    # Test to ensure wildcard at end works correctly
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="companions:one:*")
-    assert ret.returncode == 0
-    assert salt_minion.id in ret.data
-    assert salt_sub_minion.id not in ret.data
-    # Test to ensure multiple wildcards works correctly
-    ret = salt_cli.run("-G", "test.ping", minion_tgt="companions:*:*")
-    assert ret.returncode == 0
-    assert salt_minion.id in ret.data
-    assert salt_sub_minion.id in ret.data
+    for name, minion in (("minion", salt_minion), ("sub_minion", salt_sub_minion)):
+        assert (minion.id in ret.data) == (name in expected_minions)
 
 
 def test_grains_targeting_os_running(grains, salt_cli, salt_minion, salt_sub_minion):

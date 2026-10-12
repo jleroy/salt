@@ -100,3 +100,10 @@ known_third_party = [
         directory = "security"
         name = "Security"
         showcontent = true
+
+# pyinotify's setup.py rejects platforms other than Linux even when resolving
+# requirements, so we define its dependencies (none) statically below in order
+# to be able to generate requirements files on non-Linux OS.
+[[tool.uv.dependency-metadata]]
+name = "pyinotify"
+requires-dist = []

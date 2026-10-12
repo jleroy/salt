@@ -14,9 +14,54 @@ import salt.master
 import salt.payload
 import salt.utils.event
 import salt.utils.files
+import salt.utils.platform
 import salt.utils.stringutils
 from salt.master import SMaster
 from tests.support.mock import AsyncMock, MagicMock, patch
+
+
+@pytest.mark.parametrize("async_verify", [False, True])
+@pytest.mark.parametrize("verified", [False, True])
+async def test_pub_server_presence_after_unpickle(async_verify, verified):
+    """
+    Ensure a spawned channel rebuilds AES verification before presence checks.
+
+    Exercise both synchronous and asynchronous verifiers, with accepted and
+    rejected minions, because ``__setstate__`` bypasses ``__init__``.
+    """
+    parent_aes = MagicMock()
+    child_aes = MagicMock()
+    verifier = AsyncMock if async_verify else MagicMock
+    child_aes.verify_minion = verifier(return_value=verified)
+    transport = MagicMock()
+    subscriber = MagicMock(id_=None)
+    with patch("salt.master.AESFuncs", side_effect=[parent_aes, child_aes]), patch(
+        "salt.utils.event.get_event"
+    ), patch("salt.utils.minions.CkMinions"), patch(
+        "salt.crypt.MasterKeys"
+    ), patch.dict(
+        SMaster.secrets, {"aes": {"secret": MagicMock(value="test-key")}}
+    ), patch(
+        "salt.channel.server._get_crypticle"
+    ) as crypticle:
+        crypticle.return_value.loads.return_value = {"id": "minion", "tok": "token"}
+        original = server.PubServerChannel({}, transport)
+        restored = server.PubServerChannel.__new__(server.PubServerChannel)
+        restored.__setstate__(original.__getstate__())
+        try:
+            await restored.presence_callback(
+                subscriber, {"enc": "aes", "load": b"payload"}
+            )
+            child_aes.verify_minion.assert_called_once_with("minion", "token")
+            parent_aes.verify_minion.assert_not_called()
+            if async_verify:
+                child_aes.verify_minion.assert_awaited_once()
+            assert subscriber.id_ == ("minion" if verified else None)
+            assert restored.present == ({"minion": {subscriber}} if verified else {})
+        finally:
+            original.close()
+            restored.close()
+        child_aes.destroy.assert_called_once_with()
 
 
 @pytest.fixture
@@ -1307,12 +1352,14 @@ async def test_join_reply_refreshes_master_keys_cache_70090(tmp_path, key_data):
     cluster_pki = tmp_path / "cluster_pki"
     cluster_pki.mkdir()
     # Simulate the joiner's placeholder that ``_setup_keys`` wrote on
-    # startup -- the join-reply handler unlinks and rewrites these.
+    # startup -- the join-reply handler replaces these atomically.
     (cluster_pki / "cluster.pem").write_bytes(b"PLACEHOLDER-PEM")
     (cluster_pki / "cluster.pub").write_text("PLACEHOLDER-PUB")
 
     opts = {
         "id": "joiner_master",
+        "cachedir": str(tmp_path),
+        "publish_signing_algorithm": "PKCS1v15-SHA1",
         "cluster_id": "master_cluster",
         "cluster_peers": ["founder"],
         "cluster_pki_dir": str(cluster_pki),
@@ -1324,6 +1371,8 @@ async def test_join_reply_refreshes_master_keys_cache_70090(tmp_path, key_data):
     channel = server.MasterPubServerChannel.__new__(server.MasterPubServerChannel)
     channel.opts = opts
     channel._discover_token = b"test-token-0000000000000000000000"
+    channel._init_join_state()
+    channel._pending_joins["founder"] = ("join-token", "founder-public-key")
     channel._discover_event = None
     channel._raft_dispatcher = None
     channel._raft_service = None
@@ -1344,33 +1393,28 @@ async def test_join_reply_refreshes_master_keys_cache_70090(tmp_path, key_data):
     fake_master_key.cache = MagicMock()
     channel.master_key = fake_master_key
 
-    # Stub the RSA decrypt of ``cluster_key_session``: return
-    # ``discover_token + Crypticle key`` so the handler decodes cleanly.
-    session_key = salt.crypt.Crypticle.generate_key_string()
-    salted_session_bytes = channel._discover_token + session_key.encode()
-
-    # Stub Crypticle.decrypt to return our wire-delivered PEM regardless
-    # of ciphertext, and the RSA private key load to return an object
-    # whose .decrypt returns salted_session_bytes.
-    fake_private_key = MagicMock()
-    fake_private_key.decrypt.return_value = salted_session_bytes
-    fake_crypticle = MagicMock()
-    fake_crypticle.decrypt.return_value = delivered_pem
-
-    # Stub PrivateKey.from_str so the rebind at the end of the fix
-    # returns a sentinel we can identify.  ``salt.crypt.PrivateKey``
-    # normally parses the PEM; here we just verify it was called with
-    # the wire-delivered bytes and its return value bound onto master_key.
+    # Identity validation has separate coverage with real keys. Here we
+    # verify that the validated identity updates the cache and in-memory key.
     reloaded_key_sentinel = object()
+    channel._validate_join_identity = MagicMock(
+        return_value=(
+            b"cluster-aes",
+            delivered_pem,
+            delivered_pub,
+            reloaded_key_sentinel,
+        )
+    )
 
-    with patch("salt.crypt.PrivateKey.from_file", return_value=fake_private_key), patch(
-        "salt.crypt.Crypticle", return_value=fake_crypticle
-    ), patch("salt.crypt.PrivateKey.from_str", return_value=reloaded_key_sentinel):
+    with patch("salt.crypt.PublicKeyString"), patch.dict(
+        SMaster.secrets, {"cluster_aes": {"secret": MagicMock()}}
+    ):
         # Inner payload has cluster_key_session + cluster_pem +
         # cluster_pub -- exactly what the founder's join handler
         # sends under isolated-FS.
         inner_payload = {
             "peer_id": "founder",
+            "return_token": "join-token",
+            "cluster_aes": b"encrypted-aes",
             "cluster_key_session": b"encrypted-session-key",
             "cluster_pem": b"encrypted-pem",
             "cluster_pub": delivered_pub,
@@ -1435,3 +1479,47 @@ async def test_join_reply_refreshes_master_keys_cache_70090(tmp_path, key_data):
         "cluster_key (mirrors the ``self.key = self.cluster_key`` line "
         "at the end of MasterKeys._setup_keys)."
     )
+
+
+async def test_failed_peer_broadcasts_share_aes_retry(master_opts):
+    """Keep repeated multi-peer failures from multiplying AES announcements."""
+    pushers = [MagicMock(pull_host=peer) for peer in ("peer-1", "peer-2")]
+    for pusher in pushers:
+        pusher.publish = AsyncMock(side_effect=OSError("Peer not ready"))
+    channel = _pub_channel(master_opts, pushers=pushers)
+    channel.io_loop = MagicMock()
+    channel._aes_key_event_handle = None
+    channel.send_aes_key_event = MagicMock()
+    load = salt.utils.event.SaltEvent.pack("cluster/peer/master", {})
+
+    await asyncio.gather(channel.publish_payload(load), channel.publish_payload(load))
+
+    channel.io_loop.call_later.assert_called_once_with(
+        2.0, channel._retry_aes_key_event
+    )
+    channel.send_aes_key_event.assert_not_called()
+    for pusher in pushers:
+        assert pusher.pub_sock is None
+        assert pusher.publish.await_count == 2
+
+    # After the pending announcement runs, subsequent failures may retry again.
+    channel._retry_aes_key_event()
+    channel.send_aes_key_event.assert_called_once_with()
+    await channel.publish_payload(load)
+    assert channel.io_loop.call_later.call_count == 2
+
+
+def test_master_pub_close_cancels_aes_retry(master_opts):
+    """Closing a channel must cancel its outstanding AES announcement."""
+    channel = _pub_channel(master_opts)
+    channel.io_loop = MagicMock()
+    channel._aes_key_event_handle = None
+    channel._clear_pending_join = MagicMock()
+    channel._schedule_aes_key_event()
+    handle = channel._aes_key_event_handle
+
+    channel.close()
+
+    channel.io_loop.remove_timeout.assert_called_once_with(handle)
+    assert channel._aes_key_event_handle is None
+    channel.transport.close.assert_called_once_with()

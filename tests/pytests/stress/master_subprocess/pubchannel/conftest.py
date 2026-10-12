@@ -30,7 +30,10 @@ import os
 import socket
 import time
 
+import psutil
 import pytest
+
+import salt.utils.platform
 
 
 def _find_free_port() -> int:
@@ -228,6 +231,13 @@ def rss_kb(pid: int) -> int:
     """Return RSS in KiB for ``pid``; 0 if the process is gone."""
     import salt.utils.files  # pylint: disable=import-outside-toplevel
 
+    # macOS has no /proc; use real process metrics instead of returning zero.
+    if salt.utils.platform.is_darwin():
+        try:
+            return psutil.Process(pid).memory_info().rss // 1024
+        except psutil.NoSuchProcess:
+            return 0
+
     try:
         with salt.utils.files.fopen(f"/proc/{pid}/status", encoding="utf-8") as f:
             for line in f:
@@ -240,6 +250,12 @@ def rss_kb(pid: int) -> int:
 
 def fd_count(pid: int) -> int:
     """Return count of open file descriptors for ``pid``; 0 if gone."""
+    if salt.utils.platform.is_darwin():
+        try:
+            return psutil.Process(pid).num_fds()
+        except psutil.NoSuchProcess:
+            return 0
+
     try:
         return len(os.listdir(f"/proc/{pid}/fd"))
     except FileNotFoundError:

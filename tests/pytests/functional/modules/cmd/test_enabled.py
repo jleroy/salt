@@ -73,7 +73,7 @@ def test_shell_default(cmd, test_cmd, ret_enabled):
     ensure that python_shell defaults to True for cmd.shell
     """
     ret = cmd.shell(test_cmd)
-    assert ret == ret_enabled
+    assert ret.strip() == ret_enabled
 
 
 def test_run_disabled(cmd, test_cmd, ret_disabled):
@@ -150,9 +150,11 @@ def test_template_shell_default(state, state_tree, test_cmd, ret_enabled):
         test_cmd = f"'{test_cmd}'"
     else:
         test_cmd = f'"{test_cmd}"'
+    # strip() is needed because some wc versions like macOS' one pads output
+    # with spaces, unlike GNU wc.
     state_file_contents = textwrap.dedent(
         f"""
-        {{% set shell_default= salt['cmd.shell']({test_cmd}) %}}
+        {{% set shell_default= salt['cmd.shell']({test_cmd}).strip() %}}
 
         shell_default:
           test.configurable_test_state:

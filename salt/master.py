@@ -222,13 +222,18 @@ class SMaster:
         self.master_key = salt.crypt.MasterKeys(self.opts)
         self.key = self.__prep_key()
 
-    # We need __setstate__ and __getstate__ to also pickle 'SMaster.secrets'.
-    # Otherwise, 'SMaster.secrets' won't be copied over to the spawned process
-    # on Windows since spawning processes on Windows requires pickling.
-    # These methods are only used when pickling so will not be used on
-    # non-Windows platforms.
+    # We need __setstate__ and __getstate__ to also pickle 'SMaster.secrets'
+    # (a class attribute), which standard instance pickling would not carry
+    # over. These methods are only invoked when the instance is pickled, i.e.
+    # on spawn-based platforms (Windows and macOS); on fork-based platforms
+    # (Linux) they are never used.
     def __setstate__(self, state):
-        super().__setstate__(state)
+        # 'object' provides '__getstate__' (since Python 3.11) but never a
+        # matching '__setstate__', so 'super().__setstate__()' raises
+        # AttributeError. This only surfaces on spawn-based platforms
+        # (macOS/Windows) where the instance is pickled to the child process.
+        # Restore the instance state by updating '__dict__' directly instead.
+        self.__dict__.update(state)
         self.master_key = state["master_key"]
         self.key = state["key"]
         SMaster.secrets = state["secrets"]
@@ -1092,7 +1097,13 @@ class Master(SMaster):
             ipc_publisher = salt.channel.server.MasterPubServerChannel.factory(
                 self.opts,
             )
-            ipc_publisher.pre_fork(self.process_manager)
+            # Forward the secrets so the spawned EventPublisher can re-seed
+            # SMaster.secrets (see MasterPubServerChannel._publish_daemon);
+            # without this its publish_payload raises KeyError: 'aes' on
+            # spawning platforms.
+            ipc_publisher.pre_fork(
+                self.process_manager, kwargs={"secrets": SMaster.secrets}
+            )
             if not ipc_publisher.transport.started.wait(30):
                 raise salt.exceptions.SaltMasterError(
                     "IPC publish server did not start within 30 seconds. Something went wrong."
@@ -1901,12 +1912,18 @@ class MWorker(salt.utils.process.SignalHandlingProcess):
         self.pool_name = pool_name or "default"
         self.pool_index = pool_index if pool_index is not None else 0
 
-    # We need __setstate__ and __getstate__ to also pickle 'SMaster.secrets'.
-    # Otherwise, 'SMaster.secrets' won't be copied over to the spawned process
-    # on Windows since spawning processes on Windows requires pickling.
-    # These methods are only used when pickling so will not be used on
-    # non-Windows platforms.
+    # We need __setstate__ and __getstate__ to also pickle 'SMaster.secrets'
+    # (a class attribute), which standard instance pickling would not carry
+    # over. These methods are only invoked when the instance is pickled, i.e.
+    # on spawn-based platforms (Windows and macOS); on fork-based platforms
+    # (Linux) they are never used.
     def __setstate__(self, state):
+        # Unlike SMaster (which inherits 'object'), MWorker inherits
+        # salt.utils.process.Process, whose __setstate__ rebuilds the instance
+        # by re-running __init__ (restoring opts, req_channels, key, the
+        # process internals, etc.). It MUST be invoked via super(); bypassing
+        # it leaves the process half-initialized and it dies on spawn-based
+        # platforms (macOS/Windows).
         super().__setstate__(state)
         self.k_mtime = state["k_mtime"]
         SMaster.secrets = state["secrets"]
@@ -5556,6 +5573,11 @@ class ClearFuncs(TransportMethods):
                         ),
                     },
                 }
+        if "batch_handoff" in extra:
+            # Authorize the complete target and command above before persisting
+            # master-driven work. Never accept a client-supplied user or state.
+            return self._handoff_batch(clear_load, extra, minions, missing)
+
         if extra.get("batch", None) and batch_async_required(self.opts, minions, extra):
             return await self.publish_batch(clear_load, minions, missing)
 
@@ -5583,6 +5605,47 @@ class ClearFuncs(TransportMethods):
         return {
             "enc": "clear",
             "load": {"jid": clear_load["jid"], "minions": minions, "missing": missing},
+        }
+
+    def _handoff_batch(self, clear_load, extra, minions, missing):
+        """Persist an authorized async batch without publishing its first lot."""
+        import salt.utils.batch_output
+        import salt.utils.batch_state
+
+        options = extra["batch_handoff"]
+        if not isinstance(options, dict):
+            return {"error": "batch_handoff must be a dictionary"}
+        jid = self._prep_jid(clear_load, extra)
+        if jid is None or isinstance(jid, dict):
+            return jid or {"error": "Master failed to assign jid"}
+        state_opts = {
+            key: options[key]
+            for key in (
+                "batch",
+                "failhard",
+                "batch_wait",
+                "timeout",
+                "gather_job_timeout",
+            )
+            if key in options
+        }
+        state_opts.update(
+            {key: clear_load[key] for key in ("fun", "arg", "tgt", "tgt_type", "user")}
+        )
+        state_opts["ret"] = clear_load.get("ret", "")
+        state = salt.utils.batch_state.create_batch_state(
+            state_opts, minions, jid, driver="master"
+        )
+        self._prep_pub(minions, jid, clear_load, extra, missing)
+        salt.utils.batch_state.write_batch_state(jid, state, self.opts)
+        salt.utils.batch_state.add_to_active_index(jid, self.opts)
+        self.event.fire_event(
+            salt.utils.batch_output.new_payload(state),
+            salt.utils.batch_output.tag_new(jid),
+        )
+        return {
+            "enc": "clear",
+            "load": {"jid": jid, "minions": minions, "missing": missing},
         }
 
     def _prep_auth_info(self, clear_load):

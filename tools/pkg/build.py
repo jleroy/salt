@@ -790,6 +790,18 @@ def onedir_dependencies(
     if platform == "macos":
         env["OPENSSL_DIR"] = f"{dest}"
 
+    if platform in ("linux", "macos"):
+        # Build isolation installs these tools repeatedly. Use their wheels
+        # instead of rebuilding them (especially Cython) for each dependency;
+        # native runtime dependencies still use the relenv toolchain.
+        install_args.append(
+            "--only-binary=cython,setuptools,wheel,flit-core,packaging,"
+            "setuptools-scm,poetry-core,pdm-backend,scikit-build-core,"
+            "hatch-vcs,hatch-fancy-pypi-readme,coherent.licensed,"
+            "pathspec,calver,pluggy,trove-classifiers,tomlkit,expandvars,pkgconfig"
+        )
+        install_args.remove("--no-cache-dir")
+
     if platform == "linux":
         # This installs the ppbt package. We'll remove it after installing all
         # of our python packages.
@@ -855,16 +867,23 @@ def onedir_dependencies(
         "pip==26.2",
         env=pip_env,
     )
-    ctx.run(
-        str(python_bin),
-        "-m",
-        "pip",
-        "install",
-        *install_args,
-        "-r",
-        str(requirements_file),
-        env=env,
-    )
+    # Share cached wheels across isolated builds in this invocation only.
+    # A fresh cache avoids reusing native wheels from another relenv toolchain
+    # and is removed before the environment is packaged.
+    with tempfile.TemporaryDirectory(prefix="salt-pip-build-cache-") as cache_dir:
+        if platform in ("linux", "macos"):
+            env["PIP_CACHE_DIR"] = cache_dir
+            env.pop("PIP_NO_CACHE_DIR", None)
+        ctx.run(
+            str(python_bin),
+            "-m",
+            "pip",
+            "install",
+            *install_args,
+            "-r",
+            str(requirements_file),
+            env=env,
+        )
 
 
 @build.command(

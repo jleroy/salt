@@ -4,6 +4,7 @@ Unit tests for the Default Job Cache (local_cache).
 
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -44,12 +45,7 @@ def make_tmp_jid_dirs(tmp_jid_dir):
         Helper function to set up temporary directories and files used for
         testing the clean_old_jobs function.
 
-        This emulates salt.utils.jid.jid_dir() by creating this structure:
-
-        RUNTIME_VARS.TMP_JID_DIR dir/
-            random dir from tempfile.mkdtemp/
-            'jid' directory/
-                'jid' file
+        Use salt.utils.jid.jid_dir() to create the hashed job layout.
 
         Returns a temp_dir name and a jid_file_path. If create_files is False,
         the jid_file_path will be None.
@@ -58,12 +54,14 @@ def make_tmp_jid_dirs(tmp_jid_dir):
         tmp_jid_dir.mkdir(parents=True, exist_ok=True)
 
         # Then create a JID temp file in "/tmp/salt_test_job_cache/"
-        temp_dir = tmp_jid_dir / "tmp_dir"
+        dir_name = Path(
+            salt.utils.jid.jid_dir("20261009000000000000", str(tmp_jid_dir))
+        )
+        temp_dir = dir_name.parent
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         jid_file_path = None
         if create_files:
-            dir_name = temp_dir / "jid"
             dir_name.mkdir(parents=True, exist_ok=True)
             jid_file_path = dir_name / "jid"
             jid_file_path.write_text("this is a jid file")
@@ -158,7 +156,7 @@ def test_clean_old_jobs_jid_file_corrupted(make_tmp_jid_dirs, tmp_jid_dir):
     assert os.path.exists(jid_dir) is True
     assert os.path.isdir(jid_dir) is True
     # while the 'jid' dir inside it should be gone
-    assert os.path.exists(jid_dir_name) is False
+    assert not os.path.exists(os.path.dirname(jid_file))
 
 
 def test_clean_old_jobs_jid_file_is_cleaned(make_tmp_jid_dirs, tmp_jid_dir):
@@ -192,7 +190,7 @@ def test_clean_old_jobs_jid_file_is_cleaned(make_tmp_jid_dirs, tmp_jid_dir):
     assert os.path.exists(jid_dir) is True
     assert os.path.isdir(jid_dir) is True
     # while the 'jid' dir inside it should be gone
-    assert os.path.exists(jid_dir_name) is False
+    assert not os.path.exists(os.path.dirname(jid_file))
 
 
 def test_clean_old_jobs_uses_mtime_not_ctime_68351(make_tmp_jid_dirs, tmp_jid_dir):
@@ -235,3 +233,33 @@ def test_clean_old_jobs_uses_mtime_not_ctime_68351(make_tmp_jid_dirs, tmp_jid_di
     # until the next sweep, matching the existing behavior.
     assert not os.path.exists(jid_file)
     assert not os.path.exists(os.path.dirname(jid_file))
+
+
+def test_clean_old_jobs_preserves_other_cache_banks(tmp_jid_dir, make_tmp_jid_dirs):
+    """Preserve salt.cache banks while removing an expired local_cache job."""
+    _, jid_file = make_tmp_jid_dirs()
+    old_mtime = time.time() - 7200
+    os.utime(jid_file, (old_mtime, old_mtime))
+    entries = {
+        "loads/jid-0000.p": b"load",
+        "minions/jid-0000.p": b"minions",
+        "returns/jid-0000/minion-a.p": b"return",
+        "endtimes/jid-0000.p": b"endtime",
+        "nocache/jid-0000.p": b"nocache",
+        "ab": b"not a directory",
+        "zz/job/data": b"not a hash prefix",
+    }
+    for relative, content in entries.items():
+        path = tmp_jid_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    empty_bank = tmp_jid_dir / "empty-bank"
+    empty_bank.mkdir()
+    os.utime(empty_bank, (old_mtime, old_mtime))
+
+    local_cache.clean_old_jobs()
+
+    assert not Path(jid_file).parent.exists()
+    assert empty_bank.is_dir()
+    for relative, content in entries.items():
+        assert (tmp_jid_dir / relative).read_bytes() == content

@@ -17,6 +17,11 @@ def start_engines(opts, proc_mgr, proxy=None):
     """
     Fire up the configured engines!
     """
+    engines_opt = opts.get("engines", [])
+    if not engines_opt:
+        # Avoid loading modules on the event loop when there is nothing to start.
+        return
+
     utils = salt.loader.utils(opts, proxy=proxy)
     if opts["__role"] == "master":
         runners = salt.loader.runner(opts, utils=utils)
@@ -25,7 +30,6 @@ def start_engines(opts, proc_mgr, proxy=None):
     funcs = salt.loader.minion_mods(opts, utils=utils, proxy=proxy)
     engines = salt.loader.engines(opts, funcs, runners, utils, proxy=proxy)
 
-    engines_opt = opts.get("engines", [])
     if isinstance(engines_opt, dict):
         engines_opt = [{k: v} for k, v in engines_opt.items()]
 

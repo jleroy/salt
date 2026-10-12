@@ -99,7 +99,9 @@ def test_schedule_large_event(salt_master_1, salt_minion_1, script):
         salt_master_1.config["sock_dir"],
         salt_master_1.config,
     ) as event:
-        event = event.get_event(tag="bigevent", wait=15)
+        # GitHub's macOS CI can be slow to start the scheduled process and
+        # deliver its large event to the master.
+        event = event.get_event(tag="bigevent", wait=60)
         assert event
         assert "data" in event
         assert len(event["data"]) == 10000

@@ -31,20 +31,23 @@ def test_peer_churn_bounded_fd_and_rss(publisher):
     baseline_rss = rss_kb(publisher.pid)
 
     with make_pusher(publisher) as pusher:
-        # Steady-state background publishing so churning peers actually
-        # exercise the write / drop path, not just accept/close.
         for round_ in range(100):
             sub = make_subscriber(publisher)
-            sub.connect()
-            sub.start_reader()
-            # Push a couple messages so the peer is added to
-            # ``pub_server.clients`` and the fast path runs.
-            for i in range(3):
-                pusher.send(f"round-{round_}-{i}".encode())
-            # Let the subscriber receive at least one before we drop it
-            # — otherwise on zmq PUB slow-joiner it may never see any.
-            sub.wait_for_frames(1, timeout=1.0)
-            sub.close()
+            try:
+                sub.connect()
+                sub.start_reader()
+                # ZeroMQ can drop messages before the subscription is ready.
+                # Keep publishing until this peer has actually received one.
+                deadline = time.monotonic() + 5
+                while True:
+                    pusher.send(f"round-{round_}".encode())
+                    if sub.wait_for_frames(1, timeout=0.1):
+                        break
+                    assert (
+                        time.monotonic() < deadline
+                    ), f"Subscriber received no messages in churn round {round_}"
+            finally:
+                sub.close()
 
     # Give the publisher a beat to garbage-collect its ``clients`` set.
     time.sleep(1.5)

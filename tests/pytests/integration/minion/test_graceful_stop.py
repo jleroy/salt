@@ -19,10 +19,16 @@ SIGTERM to a minion running a long ``test.sleep`` job, the minion's
 ``<cachedir>/proc/`` is empty. Before the fix, that proc file survived.
 """
 
+import os
 import pathlib
+import re
+import signal
 import time
 
 import pytest
+from saltfactories.utils import random_string
+
+from tests.conftest import FIPS_TESTRUN
 
 pytestmark = [
     pytest.mark.slow_test,
@@ -36,8 +42,8 @@ pytestmark = [
 
 
 def _wait_for(predicate, timeout=30, interval=0.1, msg="condition"):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if predicate():
             return True
         time.sleep(interval)
@@ -45,21 +51,33 @@ def _wait_for(predicate, timeout=30, interval=0.1, msg="condition"):
 
 
 @pytest.fixture
-def running_minion(salt_master, salt_minion_factory):
+def running_minion(salt_master):
     """
     Fresh minion per test so the proc-dir assertion cannot be polluted by
     other test jobs.
     """
-    with salt_minion_factory.started(start_timeout=60):
-        yield salt_minion_factory
+    # The session-scoped salt_minion_factory shares its cache across tests and
+    # may contain stale proc files. Use a dedicated minion to isolate this check.
+    factory = salt_master.salt_minion_daemon(
+        random_string("graceful-stop-minion-"),
+        overrides={
+            "transport": salt_master.config["transport"],
+            "fips_mode": FIPS_TESTRUN,
+            "encryption_algorithm": "OAEP-SHA224" if FIPS_TESTRUN else "OAEP-SHA1",
+            "signing_algorithm": "PKCS1v15-SHA224" if FIPS_TESTRUN else "PKCS1v15-SHA1",
+        },
+    )
+    # Remove the accepted key so later wildcard jobs do not target this stopped minion.
+    factory.after_terminate(
+        pytest.helpers.remove_stale_minion_key, salt_master, factory.id
+    )
+    with factory.started(start_timeout=60):
+        yield factory
 
 
 def _minion_proc_dir(minion):
     """
-    Cache dir may live under ``.opts["cachedir"]`` at runtime; the factory
-    exposes it via the config on disk. Fall back to the standard
-    ``<config_dir>/../var/cache/salt/minion/proc`` layout used by the
-    factory root.
+    Return the proc directory from the minion's factory configuration.
     """
     cachedir = pathlib.Path(minion.config["cachedir"])
     return cachedir / "proc"
@@ -94,18 +112,26 @@ def test_graceful_stop_removes_proc_files_for_inflight_jobs(
     )
     assert dispatch.returncode == 0, f"async dispatch failed: {dispatch}"
 
-    # Wait for the child to actually write its proc file.
+    jid_match = re.search(r"Executed command with job ID: (\d+)", dispatch.stdout)
+    assert jid_match, f"async dispatch did not return a jid: {dispatch}"
+    proc_file = proc_dir / jid_match.group(1)
+
+    # Wait for this job, not a proc file left behind by an earlier job.
     _wait_for(
-        lambda: proc_dir.is_dir() and any(proc_dir.iterdir()),
+        proc_file.is_file,
         timeout=20,
         msg="proc file to appear",
     )
     proc_files_before = {p.name for p in proc_dir.iterdir()}
     assert proc_files_before, "precondition: expected at least one in-flight proc file"
 
-    # Deliver SIGTERM through the factory. ``.terminate()`` does
-    # ``os.kill(pid, SIGTERM)`` then waits for exit.
-    running_minion.terminate()
+    # Signal only the parent so factory cleanup cannot hide orphaned jobs.
+    os.kill(running_minion.pid, signal.SIGTERM)
+    _wait_for(
+        lambda: not running_minion.is_running(),
+        timeout=20,
+        msg="minion to exit after SIGTERM",
+    )
 
     # The proc dir must be empty after the minion has exited cleanly.
     assert not running_minion.is_running(), "minion did not exit after SIGTERM"

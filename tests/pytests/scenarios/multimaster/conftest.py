@@ -301,6 +301,7 @@ def run_salt_cmds():
                     clis_to_check.pop(minion)
                     continue
                 for cli in list(clis_to_check[minion]):
+                    started = time.monotonic()
                     try:
                         ret = cli.run(
                             f"--timeout={timeout}",
@@ -311,11 +312,29 @@ def run_salt_cmds():
                         if ret.returncode == 0 and ret.data is True:
                             returned_minions.append((cli, minion_instances[minion]))
                             clis_to_check[minion].remove(cli)
-                    except FactoryTimeout:
-                        log.debug(
-                            "Failed to execute test.ping from %s to %s.",
+                        else:
+                            # Temporary diagnostics for the Amazon Linux 2 failures;
+                            # remove once the cause is resolved.
+                            log.warning(
+                                "test.ping from %s to %s failed after %.2fs: "
+                                "cmdline=%r returncode=%s data=%r stdout=%r stderr=%r",
+                                cli.get_display_name(),
+                                minion,
+                                time.monotonic() - started,
+                                ret.cmdline,
+                                ret.returncode,
+                                ret.data,
+                                ret.stdout,
+                                ret.stderr,
+                            )
+                    except FactoryTimeout as exc:
+                        # FactoryTimeout includes the command and captured output.
+                        log.warning(
+                            "test.ping from %s to %s timed out after %.2fs: %s",
                             cli.get_display_name(),
                             minion,
+                            time.monotonic() - started,
+                            exc,
                         )
             time.sleep(1)
             attempts -= 1

@@ -216,7 +216,14 @@ class LoadBalancerServer(salt.utils.process.SignalHandlingProcess):
 
     def close(self):
         if self._socket is not None:
-            self._socket.shutdown(socket.SHUT_RDWR)
+            try:
+                self._socket.shutdown(socket.SHUT_RDWR)
+            except OSError as exc:
+                # The socket is a listening socket with no connected peer, so
+                # shutdown() raises ENOTCONN on some platforms (e.g. macOS/BSD).
+                # There is nothing to shut down in that case, just close it.
+                if exc.errno != errno.ENOTCONN:
+                    raise
             self._socket.close()
             self._socket = None
 
@@ -658,15 +665,6 @@ class PublishClient(salt.transport.base.PublishClient):
         self.close()
 
 
-class TCPPubClient(PublishClient):
-    def __init__(self, *args, **kwargs):  # pylint: disable=W0231
-        salt.utils.versions.warn_until(
-            3009,
-            "TCPPubClient has been deprecated, use PublishClient instead.",
-        )
-        super().__init__(*args, **kwargs)
-
-
 class RequestServer(salt.transport.base.DaemonizedRequestServer):
     """
     Tornado based TCP Request/Reply Server
@@ -1053,281 +1051,6 @@ class TCPClientKeepAlive(tornado.tcpclient.TCPClient):
         stream = tornado.iostream.IOStream(sock, max_buffer_size=max_buffer_size)
         _cap_stream_write_buffer(stream, self.opts)
         return stream, stream.connect(addr)
-
-
-class MessageClient:
-    """
-    Low-level message sending client
-    """
-
-    def __init__(
-        self,
-        opts,
-        host,
-        port,
-        io_loop=None,
-        resolver=None,
-        connect_callback=None,
-        disconnect_callback=None,
-        source_ip=None,
-        source_port=None,
-    ):
-        salt.utils.versions.warn_until(
-            3009,
-            "MessageClient has been deprecated and will be removed.",
-        )
-        self.opts = opts
-        self.host = host
-        self.port = port
-        self.source_ip = source_ip
-        self.source_port = source_port
-        self.connect_callback = connect_callback
-        self.disconnect_callback = disconnect_callback
-        if io_loop is None:
-            io_loop = tornado.ioloop.IOLoop.current()
-        self.io_loop = io_loop
-        self.asyncio_loop = salt.utils.asynchronous.aioloop(io_loop)
-        self._tcp_client = TCPClientKeepAlive(opts, resolver=resolver)
-        # TODO: max queue size
-        self.send_future_map = {}  # mapping of request_id -> Future
-
-        self._read_until_future = None
-        self._on_recv = None
-        self._closing = False
-        self._closed = False
-        self._connecting_future = self.asyncio_loop.create_future()
-        self._stream_return_running = False
-        self._stream = None
-
-        self.backoff = opts.get("tcp_reconnect_backoff", 1)
-
-    def close(self):
-        # Under salt-api load memray showed 18 MessageClient objects
-        # leaking per second (see analysis of the +5.8 GB/h post-inflection
-        # phase on the TCP-transport stress soak).  The previous
-        # implementation of ``close()`` scheduled ``check_close`` on the
-        # IOLoop and polled ``send_future_map`` at 1s intervals for it to
-        # empty, only actually closing the transport after that.  Under
-        # sustained load a single orphaned in-flight future -- e.g. because
-        # the awaiting coroutine was cancelled by cherrypy mid-request --
-        # kept ``send_future_map`` non-empty forever, so ``check_close``
-        # never converged and the whole MessageClient graph (Unpacker,
-        # IOStream, LazyLoaders reachable via ``self``) stayed alive.
-        # Additionally the ``_stream_return`` coroutine holds ``self``
-        # implicitly via its ``self.X`` accesses, so ``__del__`` never
-        # fired either.
-        #
-        # Close synchronously: any caller of ``close()`` has told us they
-        # no longer need the pending replies, so cancel their in-flight
-        # futures with a timeout error (rather than orphaning them), then
-        # tear the stream down immediately.  ``_stream_return`` will see
-        # ``_closed=True`` on its next resume (via StreamClosedError as
-        # the stream closes) and exit its loop, releasing the last strong
-        # reference to ``self``.
-        if self._closing or self._closed:
-            return
-        self._closing = True
-        for future in list(self.send_future_map.values()):
-            if not future.done():
-                future.set_exception(
-                    SaltReqTimeoutError("MessageClient closed with pending requests")
-                )
-        self.send_future_map = {}
-        self._tcp_client.close()
-        if self._stream:
-            self._stream.close()
-        self._stream = None
-        self._closed = True
-        self._closing = False
-
-    # pylint: disable=W1701
-    def __del__(self):
-        self.close()
-
-    # pylint: enable=W1701
-
-    async def getstream(self, **kwargs):
-        if self.source_ip or self.source_port:
-            kwargs = {
-                "source_ip": self.source_ip,
-                "source_port": self.source_port,
-            }
-        stream = None
-        while stream is None and (not self._closed and not self._closing):
-            try:
-                stream = await self._tcp_client.connect(
-                    ip_bracket(self.host, strip=True),
-                    self.port,
-                    ssl_options=self.opts.get("ssl"),
-                    **kwargs,
-                )
-            except Exception as exc:  # pylint: disable=broad-except
-                log.warning(
-                    "TCP Message Client encountered an exception while connecting to"
-                    " %s:%s: %r, will reconnect in %d seconds",
-                    self.host,
-                    self.port,
-                    exc,
-                    self.backoff,
-                )
-                await asyncio.sleep(self.backoff)
-
-        return stream
-
-    async def connect(self):
-        # If ``close()`` ran while we were awaiting ``getstream()`` (for
-        # example after ``_stream_return`` saw a StreamClosedError and
-        # called us to reconnect), don't clobber the close flags.  The
-        # earlier unconditional reset of ``_closing``/``_closed`` here
-        # raced with ``close()`` and kept ``_stream_return`` running past
-        # the intended shutdown, which is one of the causes of the
-        # MessageClient leak under salt-api load.
-        if self._closing or self._closed:
-            return
-        if self._stream is None:
-            self._stream = await self.getstream()
-            if self._stream:
-                if not self._stream_return_running:
-                    return_task = self.asyncio_loop.create_task(self._stream_return())
-                if self.connect_callback:
-                    self.connect_callback(True)
-
-    async def _stream_return(self):
-        self._stream_return_running = True
-        unpacker = salt.utils.msgpack.Unpacker()
-        while not self._closed and not self._closing:
-            try:
-                wire_bytes = await self._stream.read_bytes(4096, partial=True)
-                unpacker.feed(wire_bytes)
-                for framed_msg in unpacker:
-                    framed_msg = salt.transport.frame.decode_embedded_strs(framed_msg)
-                    header = framed_msg["head"]
-                    body = framed_msg["body"]
-                    message_id = header.get("mid")
-
-                    if message_id in self.send_future_map:
-                        self.send_future_map.pop(message_id).set_result(body)
-                        # self.remove_message_timeout(message_id)
-                    else:
-                        if self._on_recv is not None:
-                            self.io_loop.call_soon(self._on_recv, header, body)
-                        else:
-                            log.error(
-                                "Got response for message_id %s that we are not"
-                                " tracking",
-                                message_id,
-                            )
-            except tornado.iostream.StreamClosedError as e:
-                log.debug(
-                    "tcp stream to %s:%s closed, unable to recv",
-                    self.host,
-                    self.port,
-                )
-                for future in self.send_future_map.values():
-                    future.set_exception(e)
-                self.send_future_map = {}
-                if self._closing or self._closed:
-                    return
-                if self.disconnect_callback:
-                    self.disconnect_callback()
-                stream = self._stream
-                self._stream = None
-                if stream:
-                    stream.close()
-                unpacker = salt.utils.msgpack.Unpacker()
-                await self.connect()
-            except TypeError:
-                # This is an invalid transport
-                if "detect_mode" in self.opts:
-                    log.info(
-                        "There was an error trying to use TCP transport; "
-                        "attempting to fallback to another transport"
-                    )
-                else:
-                    raise SaltClientError
-            except Exception as e:  # pylint: disable=broad-except
-                log.error("Exception parsing response", exc_info=True)
-                for future in self.send_future_map.values():
-                    future.set_exception(e)
-                self.send_future_map = {}
-                if self._closing or self._closed:
-                    return
-                if self.disconnect_callback:
-                    self.disconnect_callback()
-                stream = self._stream
-                self._stream = None
-                if stream:
-                    stream.close()
-                unpacker = salt.utils.msgpack.Unpacker()
-                await self.connect()
-        self._stream_return_running = False
-
-    def _message_id(self):
-        return str(uuid.uuid4())
-
-    # TODO: return a message object which takes care of multiplexing?
-    def on_recv(self, callback):
-        """
-        Register a callback for received messages (that we didn't initiate)
-        """
-        if callback is None:
-            self._on_recv = callback
-        else:
-
-            def wrap_recv(header, body):
-                callback(body)
-
-            self._on_recv = wrap_recv
-
-    def remove_message_timeout(self, message_id):
-        if message_id not in self.send_timeout_map:
-            return
-        timeout = self.send_timeout_map.pop(message_id)
-        self.io_loop.remove_timeout(timeout)
-
-    def timeout_message(self, message_id, msg):
-        if message_id not in self.send_future_map:
-            return
-        future = self.send_future_map.pop(message_id)
-        if future is not None:
-            future.set_exception(SaltReqTimeoutError("Message timed out"))
-
-    async def send(self, msg, timeout=None, callback=None, raw=False):
-        if self._closing:
-            raise ClosingError()
-        message_id = self._message_id()
-        header = {"mid": message_id}
-
-        future = self.asyncio_loop.create_future()
-
-        if callback is not None:
-
-            def handle_future(future):
-                response = future.result()
-                self.io_loop.add_callback(callback, response)
-
-            future.add_done_callback(handle_future)
-        # Add this future to the mapping
-        self.send_future_map[message_id] = future
-
-        if self.opts.get("detect_mode") is True:
-            timeout = 1
-
-        if timeout is not None:
-            self.io_loop.call_later(timeout, self.timeout_message, message_id, msg)
-
-        item = salt.transport.frame.frame_msg(msg, header=header)
-
-        async def _do_send():
-            await self.connect()
-            # If the _stream is None, we failed to connect.
-            if self._stream:
-                await self._stream.write(item)
-
-        # Run send in a callback so we can wait on the future, in case we time
-        # out before we are able to connect.
-        send_task = self.asyncio_loop.create_task(_do_send())
-        return await future
 
 
 class Subscriber:
@@ -2593,15 +2316,6 @@ class PublishServer(salt.transport.base.DaemonizedPublishServer):
     # pylint: enable=W1701
 
 
-class TCPPublishServer(PublishServer):
-    def __init__(self, *args, **kwargs):  # pylint: disable=W0231
-        salt.utils.versions.warn_until(
-            3009,
-            "TCPPublishServer has been deprecated, use PublishServer instead.",
-        )
-        super().__init__(*args, **kwargs)
-
-
 class _TCPPubServerPublisher:
     """
     Client half of the local publish channel used for the Salt event bus.
@@ -2713,7 +2427,16 @@ class _TCPPubServerPublisher:
                 if self.max_write_buffer_size:
                     self.stream.max_write_buffer_size = self.max_write_buffer_size
             try:
-                await self.stream.connect(sock_addr)
+                # "timeout" here bounds the whole retry loop; without also
+                # bounding the individual connect, a connect to an unreachable
+                # host blocks for the full OS timeout (SYN retries, ~tens of
+                # seconds) before the loop can re-check. Cap the per-attempt
+                # connect so callers that pass a timeout (e.g. cluster peer
+                # pushers) actually fail fast.
+                if timeout is not None:
+                    await asyncio.wait_for(self.stream.connect(sock_addr), timeout)
+                else:
+                    await self.stream.connect(sock_addr)
                 # ``close()`` may have run while we were awaiting
                 # ``stream.connect()``; it nulls ``_connecting_future``. Issue
                 # #69187: skip the result-setting in that case rather than
@@ -2897,6 +2620,75 @@ class _TCPPubServerPublisher:
             await self.connect()
         pack = salt.transport.frame.frame_msg_ipc(msg, raw_body=True)
         await self.stream.write(pack)
+
+
+class ClusterPeerPusher:
+    """
+    Fully-async client that pushes events to a single cluster peer's pull
+    socket, used by ``salt.channel.server.MasterPubServerChannel`` to fan
+    events out to peer masters.
+
+    Unlike ``PublishServer.publish`` (which wraps connect/send in a
+    ``SyncWrapper`` driving a nested, *blocking* ``run_until_complete``), this
+    awaits connect/send directly, so a push to an unreachable peer never blocks
+    the caller's io_loop. That matters during cluster bring-up: the founding
+    master comes up before its peers exist, and a blocking connect to a
+    not-yet-listening peer would stall the event loop and starve delivery of
+    the master's own local events (e.g. ``salt/master/<id>/start``), preventing
+    it from ever signalling that it started.
+    """
+
+    def __init__(self, pull_host, pull_port, connect_timeout=None):
+        self.pull_host = pull_host
+        self.pull_port = pull_port
+        self.connect_timeout = connect_timeout
+        self.pub_sock = None
+        # A single in-flight (re)connect, shared by all concurrent publishes.
+        self._connecting = None
+
+    async def _ensure_connected(self):
+        if self.pub_sock is not None and self.pub_sock.connected():
+            return
+        # ``self.pushers`` are reused and shared across concurrent
+        # ``publish_payload`` calls. If each publish reconnected on its own, two
+        # of them would race to replace ``self.pub_sock`` -- one tearing down
+        # the socket another is mid-send on -- dropping peer events.
+        #
+        # The first publish to find the socket down starts one reconnect; the
+        # rest await that same attempt. Concurrent pushes to a still-down peer
+        # share a single timeout (not N), and only one writer ever touches
+        # ``self.pub_sock``.
+        if self._connecting is None:
+            self._connecting = asyncio.ensure_future(self._reconnect())
+        connecting = self._connecting
+        try:
+            await connecting
+        finally:
+            if self._connecting is connecting:
+                self._connecting = None
+
+    async def _reconnect(self):
+        if self.pub_sock is not None:
+            self.pub_sock.close()
+            self.pub_sock = None
+        sock = _TCPPubServerPublisher(self.pull_host, self.pull_port, None)
+        await sock.connect(timeout=self.connect_timeout)
+        self.pub_sock = sock
+
+    async def publish(self, payload, **kwargs):
+        await self._ensure_connected()
+        if self.pub_sock is None or not self.pub_sock.connected():
+            # The connection dropped between connect and send; surface it so the
+            # publish_payload handler resets us for a fresh (timeout-bounded)
+            # reconnect, rather than letting send() fall into its own unbounded,
+            # timeout-less reconnect.
+            raise tornado.iostream.StreamClosedError()
+        await self.pub_sock.send(payload)
+
+    def close(self):
+        if self.pub_sock is not None:
+            self.pub_sock.close()
+            self.pub_sock = None
 
 
 class RequestClient(salt.transport.base.RequestClient):
@@ -3106,6 +2898,13 @@ class RequestClient(salt.transport.base.RequestClient):
         if self._closing:
             return
         self._closing = True
+        # Cancelling the reader can prevent it from propagating StreamClosedError
+        # to Salt's reply futures. Resolve them here so requests cannot hang.
+        pending = list(self.send_future_map.values())
+        self.send_future_map.clear()
+        for future in pending:
+            if not future.done():
+                future.set_exception(tornado.iostream.StreamClosedError())
         if self._stream is not None:
             self._stream.close()
             self._stream = None

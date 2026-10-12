@@ -543,7 +543,8 @@ def test_subscriber_churn_no_fd_leak(ep):
 
     baseline_fds = ep.fd_count()
     baseline_rss = ep.rss_bytes()
-    assert baseline_fds > 0, "could not read /proc — Linux-only test"
+    assert baseline_fds > 0, "EventPublisher has no open file descriptors"
+    assert baseline_rss > 0, "EventPublisher RSS measurement is empty"
 
     churn_n = 100
     for _ in range(churn_n):

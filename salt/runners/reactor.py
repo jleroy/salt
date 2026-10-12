@@ -67,6 +67,10 @@ def list_(saltenv="base", test=None):
         __jid_event__.fire_event({"key": master_key}, "salt/reactors/manage/list")
 
         results = sevent.get_event(wait=30, tag="salt/reactors/manage/list-results")
+        if results is None:
+            raise CommandExecutionError(
+                "Timed out waiting for a response from the reactor system."
+            )
         reactors = results.get("reactors")
         return reactors
 
@@ -102,6 +106,10 @@ def add(event, reactors, saltenv="base", test=None):
         )
 
         res = sevent.get_event(wait=30, tag="salt/reactors/manage/add-complete")
+        if res is None:
+            raise CommandExecutionError(
+                "Timed out waiting for a response from the reactor system."
+            )
         return res.get("result")
 
 
@@ -132,6 +140,10 @@ def delete(event, saltenv="base", test=None):
         )
 
         res = sevent.get_event(wait=30, tag="salt/reactors/manage/delete-complete")
+        if res is None:
+            raise CommandExecutionError(
+                "Timed out waiting for a response from the reactor system."
+            )
         return res.get("result")
 
 
@@ -160,6 +172,10 @@ def is_leader():
         __jid_event__.fire_event({"key": master_key}, "salt/reactors/manage/is_leader")
 
         res = sevent.get_event(wait=30, tag="salt/reactors/manage/leader/value")
+        if res is None:
+            raise CommandExecutionError(
+                "Timed out waiting for a response from the reactor system."
+            )
         return res["result"]
 
 
@@ -191,4 +207,8 @@ def set_leader(value=True):
         )
 
         res = sevent.get_event(wait=30, tag="salt/reactors/manage/leader/value")
+        if res is None:
+            raise CommandExecutionError(
+                "Timed out waiting for a response from the reactor system."
+            )
         return res["result"]

@@ -278,6 +278,21 @@ def test_is_leader():
                     ret = reactor.is_leader()
                     assert ret
 
+    # When the reactor system does not respond in time, get_event returns
+    # None; the runner must raise a clear error instead of crashing with
+    # "'NoneType' object is not subscriptable".
+    with patch.dict(reactor.__opts__, mock_opts):
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=None):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    with pytest.raises(CommandExecutionError) as excinfo:
+                        reactor.is_leader()
+                    assert (
+                        excinfo.value.error
+                        == "Timed out waiting for a response from the reactor system."
+                    )
+
 
 def test_set_leader():
     """
@@ -314,3 +329,18 @@ def test_set_leader():
                     get_master_key.retun_value = MagicMock(retun_value="master_key")
                     ret = reactor.set_leader()
                     assert ret
+
+    # When the reactor system does not respond in time, get_event returns
+    # None; the runner must raise a clear error instead of crashing with
+    # "'NoneType' object is not subscriptable".
+    with patch.dict(reactor.__opts__, mock_opts):
+        with patch.object(SaltEvent, "connect_pub", return_value=True):
+            with patch.object(SaltEvent, "get_event", return_value=None):
+                with patch("salt.utils.master.get_master_key") as get_master_key:
+                    get_master_key.retun_value = MagicMock(retun_value="master_key")
+                    with pytest.raises(CommandExecutionError) as excinfo:
+                        reactor.set_leader()
+                    assert (
+                        excinfo.value.error
+                        == "Timed out waiting for a response from the reactor system."
+                    )

@@ -48,6 +48,9 @@ def run():
     return "wrapper"
 """
     name = "exewrap"
+    # sync_all would delete unrelated extensions (including master_tops_test)
+    # from the shared master when they are absent from the fileserver.
+    sync_functions = ("modules", "wrapper")
     try:
         with pytest.helpers.temp_file(
             f"{name}.py", exe, base_env_state_tree_root_dir / "_modules"
@@ -55,14 +58,15 @@ def run():
             with pytest.helpers.temp_file(
                 f"{name}.py", wrapper, base_env_state_tree_root_dir / "_wrapper"
             ):
-                res = salt_run_cli.run("saltutil.sync_all")
-                assert res.returncode == 0
-                assert f"modules.{name}" in res.data["modules"]
-                assert f"wrapper.{name}" in res.data["wrapper"]
+                for kind in sync_functions:
+                    res = salt_run_cli.run(f"saltutil.sync_{kind}")
+                    assert res.returncode == 0
+                    assert f"{kind}.{name}" in res.data
                 yield name
     finally:
-        res = salt_run_cli.run("saltutil.sync_all")
-        assert res.returncode == 0
+        for kind in sync_functions:
+            res = salt_run_cli.run(f"saltutil.sync_{kind}")
+            assert res.returncode == 0
 
 
 @pytest.fixture

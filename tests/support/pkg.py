@@ -662,6 +662,39 @@ class SaltPkgInstall:
             return pathlib.Path("/opt/salt")
         return pathlib.Path("/")
 
+    def _run_macos_installer(self, pkg):
+        """Run the installer and preserve diagnostics on failure or timeout."""
+        ret = None
+        try:
+            ret = self.proc.run("installer", "-pkg", str(pkg), "-target", "/")
+            return ret
+        finally:
+            if ret is None or ret.returncode != 0:
+                self._collect_macos_installer_logs()
+
+    @staticmethod
+    def _collect_macos_installer_logs():
+        """Keep full installer logs in CI artifacts and log their final lines."""
+        # The installer only reports that a package script failed; these logs
+        # identify the failing command without changing installation behavior.
+        destination = (
+            CODE_DIR / "artifacts" / "logs" / f"macos-installer-{time.time_ns()}"
+        )
+        for source in (
+            pathlib.Path("/tmp/preinstall.txt"),
+            pathlib.Path("/tmp/postinstall.txt"),
+            pathlib.Path("/var/log/install.log"),
+        ):
+            try:
+                destination.mkdir(parents=True, exist_ok=True)
+                saved = destination / source.name
+                shutil.copyfile(source, saved)
+                lines = saved.read_text(encoding="utf-8", errors="replace").splitlines()
+                log.error("Last 200 lines of %s:\n%s", source, "\n".join(lines[-200:]))
+            except OSError as exc:
+                # Diagnostics must not hide the original installation failure.
+                log.warning("Could not collect installer log %s: %s", source, exc)
+
     def _check_retcode(self, ret):
         """
         Helper function to check subprocess.run returncode equals 0
@@ -763,7 +796,7 @@ class SaltPkgInstall:
         elif platform.is_darwin():
             daemons_dir = pathlib.Path("/Library", "LaunchDaemons")
             log.debug("Installing: %s", str(pkg))
-            ret = self.proc.run("installer", "-pkg", str(pkg), "-target", "/")
+            ret = self._run_macos_installer(pkg)
             self._check_retcode(ret)
 
             # The installer's postinstall script starts the minion and may trigger
@@ -1311,14 +1344,31 @@ class SaltPkgInstall:
                 )
                 assert ret.returncode in [0, 3010]
             else:
-                # ret = self.proc.run("start", "/wait", f"\"{pkg_path} /start-minion=0 /S\"")
-                batch_file = pkg_path.parent / "install_nsis.cmd"
-                batch_content = f"start /wait {str(pkg_path)} /start-minion=0 /S"
-                with salt.utils.files.fopen(batch_file, "w") as fp:
-                    fp.write(batch_content)
-                # Now run the batch file
-                ret = self.proc.run("cmd.exe", "/c", str(batch_file))
-                self._check_retcode(ret)
+                # NSIS installers built before the silent-mode exit fix
+                # (< 3008.2, commit 421a8a8da7) can hang at process exit on
+                # Windows 2025 / 11 24H2+, where the wmic force-kill fallback
+                # the installer relied on no longer exists. The install itself
+                # completes ("Salt installation complete" is logged); only the
+                # process fails to exit. Bound the wait and force-kill a hung
+                # installer tree — the version assertions below confirm the
+                # downgrade actually succeeded.
+                proc = subprocess.Popen(  # nosec
+                    [str(pkg_path), "/start-minion=0", "/S"],
+                )
+                try:
+                    ret = proc.wait(timeout=300)
+                except subprocess.TimeoutExpired:
+                    log.warning(
+                        "NSIS installer %s did not exit; force-killing the "
+                        "hung process tree",
+                        pkg_path,
+                    )
+                    subprocess.run(  # nosec
+                        ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                        check=False,
+                    )
+                else:
+                    assert ret == 0, f"NSIS installer exited with {ret}"
 
             log.debug("Removing installed salt-minion service")
             ret = self.proc.run(str(self.ssm_bin), "remove", "salt-minion", "confirm")
@@ -1350,7 +1400,7 @@ class SaltPkgInstall:
                     f"/tmp/{mac_pkg}",
                 )
 
-            ret = self.proc.run("installer", "-pkg", mac_pkg_path, "-target", "/")
+            ret = self._run_macos_installer(mac_pkg_path)
             self._check_retcode(ret)
 
             # Stop services started by the old installer so the test framework
@@ -1380,6 +1430,15 @@ class SaltPkgInstall:
                 if p.endswith(self.file_ext):
                     pkg = p
                     break
+        if platform.is_windows() and self.use_prev_version and self.file_ext == "msi":
+            # After a downgrade, the built package (self.pkgs[0]) has been
+            # replaced by prev_version, so uninstall the version actually
+            # installed (downloaded by install_previous under C:\TEMP).
+            pkg = str(
+                pathlib.Path(
+                    r"C:\TEMP", f"Salt-Minion-{self.prev_version}-Py3-AMD64.msi"
+                )
+            )
         if platform.is_windows():
             log.info("Uninstalling %s", pkg)
             if pkg.endswith("exe"):

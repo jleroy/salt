@@ -636,7 +636,14 @@ def pytest_collection_modifyitems(config, items):
                 # is not already applied
                 # Default to counting only the test execution for the timeouts, ie,
                 # withough including the fixtures setup time towards the timeout.
-                item.add_marker(pytest.mark.timeout(90, func_only=True))
+                timeout = 90
+                # GitHub's macOS CI can be slow.
+                if salt.utils.platform.is_darwin() and any(
+                    pathlib.Path(item.fspath).resolve().is_relative_to(path)
+                    for path in (TESTS_DIR / "integration", PYTESTS_DIR / "integration")
+                ):
+                    timeout = 180
+                item.add_marker(pytest.mark.timeout(timeout, func_only=True))
 
 
 def pytest_markeval_namespace(config):
@@ -951,6 +958,30 @@ def groups_collection_modifyitems(config, items):
 
 
 # ----- Fixtures Overrides ------------------------------------------------------------------------------------------>
+@pytest.fixture(scope="session", autouse=True)
+def worker_pool_ports():
+    """Reserve hash-derived worker ports for test masters using TCP IPC."""
+
+    from pytestshellutils.utils import ports
+    from saltfactories.daemons.master import SaltMaster
+
+    from tests.support.worker_ports import WorkerPortAllocator
+
+    allocator = WorkerPortAllocator(ports.get_unused_localhost_port)
+    default_config = SaltMaster.default_config.__func__
+
+    def master_config(cls, *args, **kwargs):
+        config = default_config(cls, *args, **kwargs)
+        return allocator.configure_master(config)
+
+    # Checking only the base port misses the hash offsets used by worker pools.
+    # Track every allocation so later minions cannot reuse a pool's endpoint.
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(ports, "get_unused_localhost_port", allocator.unused_port)
+        patcher.setattr(SaltMaster, "default_config", classmethod(master_config))
+        yield
+
+
 @pytest.fixture(scope="session")
 def salt_factories_default_root_dir(salt_factories_default_root_dir):
     """

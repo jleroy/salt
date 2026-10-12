@@ -1,6 +1,5 @@
 import logging
 import os
-import shutil
 
 import pytest
 
@@ -11,7 +10,7 @@ log = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
-def _install_salt_extension(shell):
+def _install_salt_extension(shell, build_wheel):
     if os.environ.get("ONEDIR_TESTRUN", "0") == "0":
         yield
         return
@@ -22,15 +21,24 @@ def _install_salt_extension(shell):
 
     script_path = CODE_DIR / "artifacts" / "salt" / script_name
     assert script_path.exists()
+    wheel_path = build_wheel(
+        "salt-test-extension",
+        "0.1.0",
+        entry_points="[salt.loader]\nsalt-test-extension = salt_test_extension\n",
+    )
+    # Only extension metadata is needed for the version report. Resolving real
+    # extension dependencies can replace Salt and corrupt the onedir under test.
     try:
-        ret = shell.run(str(script_path), "install", "salt-analytics-framework==0.1.0")
+        ret = shell.run(
+            str(script_path), "install", "--no-index", "--no-deps", str(wheel_path)
+        )
         assert ret.returncode == 0
         log.info(ret)
         yield
     finally:
-        ret = shell.run(str(script_path), "uninstall", "-y", "salt-analytics-framework")
+        ret = shell.run(str(script_path), "uninstall", "-y", "salt-test-extension")
         log.info(ret)
-        shutil.rmtree(script_path.parent / "extras-3.10", ignore_errors=True)
+        assert ret.returncode == 0, ret.stderr
 
 
 @pytest.mark.windows_whitelisted
@@ -89,7 +97,7 @@ def test_versions_report(salt_cli):
     assert "onedir" in ret_dict["Salt Package Information"]["Package Type"]
     assert "relenv" in ret_dict["Dependency Versions"]
     assert "Salt Extensions" in ret_dict
-    assert "salt-analytics-framework" in ret_dict["Salt Extensions"]
+    assert ret_dict["Salt Extensions"]["salt-test-extension"] == "0.1.0"
 
 
 def test_help_log(salt_cli):

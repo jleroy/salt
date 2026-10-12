@@ -27,13 +27,14 @@ import socket
 import time
 from dataclasses import dataclass, field
 
+import psutil
 import pytest
 
 import salt.channel.server
 import salt.config
 import salt.transport.base
 import salt.transport.tcp
-import salt.utils.files
+import salt.utils.platform
 import salt.utils.process
 
 
@@ -122,29 +123,15 @@ class EPHandle:
 
     def rss_bytes(self) -> int:
         """
-        Read RSS for the EP subprocess via ``/proc/<pid>/status`` — no
-        external psutil dep, Linux-only.  Returns 0 if the file is
-        unavailable or the process is gone.
+        Read the EP subprocess RSS in bytes on Linux and macOS.
         """
-        try:
-            with salt.utils.files.fopen(
-                f"/proc/{self.process.pid}/status", encoding="utf-8"
-            ) as fh:
-                for line in fh:
-                    if line.startswith("VmRSS:"):
-                        return int(line.split()[1]) * 1024
-        except OSError:
-            pass
-        return 0
+        return psutil.Process(self.process.pid).memory_info().rss
 
     def fd_count(self) -> int:
         """
-        Count open FDs on the EP subprocess.  Linux-specific.
+        Count open FDs on the EP subprocess on Linux and macOS.
         """
-        try:
-            return len(os.listdir(f"/proc/{self.process.pid}/fd"))
-        except OSError:
-            return 0
+        return psutil.Process(self.process.pid).num_fds()
 
     def stop(self, timeout: float = 5.0) -> None:
         if self._stopped:
@@ -229,15 +216,20 @@ def _spawn_ep(opts: dict, root: pathlib.Path) -> EPHandle:
 
 
 @pytest.fixture
-def ep_root(tmp_path_factory) -> pathlib.Path:
+def ep_root(tmp_path_factory, socket_tmp_path) -> pathlib.Path:
     """
     Short-path scratch dir for one EP invocation.  Deliberately
     per-test-function so subprocess crashes don't poison a session-scoped
     fixture.  ``sock_dir`` inside must stay under ~90 chars (UNIX socket
     path limit).
     """
-    # ``tmp_path_factory`` roots under ``/tmp/pytest-of-<user>/…`` which
-    # can be 60+ chars already — nest minimally.
+    # macOS's system temp path is too long even without the test name.
+    # socket_tmp_path provides a shorter path and owns its cleanup there.
+    if salt.utils.platform.is_darwin():
+        yield socket_tmp_path
+        return
+    # Keep the short basename on other platforms: tmp_path includes the
+    # full test name, which can also exceed the UNIX socket path limit.
     base = tmp_path_factory.mktemp("ep", numbered=True)
     yield base
     # Best-effort cleanup — subprocess may still hold FDs briefly.

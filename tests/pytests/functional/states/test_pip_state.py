@@ -45,6 +45,18 @@ pytestmark = [
 ]
 
 
+# Import pip's location machinery at collection time -- before any test runs and
+# any salt daemon starts forking. On a relenv onedir this runs relenv's one-shot
+# system-python sysconfig subprocess and memoizes it, so ``pip.installed`` never
+# triggers it mid-run, where a forking daemon inheriting its open pipe makes the
+# read hang until the timeout (Linux + the "fork" start method). Doing it in a
+# fixture is too late: it runs after earlier tests have started those daemons.
+try:
+    import pip._internal.req.constructors  # noqa: F401  pylint: disable=unused-import
+except ImportError:
+    pass
+
+
 def _win_user_where(username, password, program):
     cmd = f"cmd.exe /c where {program}"
     ret = salt.utils.win_runas.runas(cmd, username, password)

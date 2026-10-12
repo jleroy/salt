@@ -281,7 +281,8 @@ def salt_secondary_minion(salt_secondary_master):
 @pytest.fixture(scope="module")
 def salt_cli_secondary_wrapper(salt_secondary_master, salt_secondary_minion):
     def run_command(*command, **kwargs):
-        salt_cli = salt_secondary_master.salt_cli()
+        # Match the primary CLI timeout; the 5s default is too short on slow CI.
+        salt_cli = salt_secondary_master.salt_cli(timeout=30)
         return salt_cli.run(*command, minion_tgt=salt_secondary_minion.id, **kwargs)
 
     return run_command

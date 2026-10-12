@@ -553,9 +553,14 @@ def clean_old_jobs():
         dirs_to_remove = set()
 
         for top in os.listdir(jid_root):
+            # local_cache uses two-character hexadecimal hash prefixes.
+            # Other cache backends share jobs/ (e.g. jobs/returns) and must
+            # not be treated as corrupt local_cache entries.
+            if len(top) != 2 or any(char not in "0123456789abcdef" for char in top):
+                continue
             t_path = os.path.join(jid_root, top)
 
-            if not os.path.exists(t_path):
+            if not os.path.isdir(t_path):
                 continue
 
             # Check if there are any stray/empty JID t_path dirs

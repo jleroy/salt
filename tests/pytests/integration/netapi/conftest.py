@@ -34,18 +34,20 @@ def load_auth(client_config):
 
 @pytest.fixture(scope="package")
 def salt_netapi_account(salt_netapi_account_factory):
-    # CI runs these jobs as root so user.add succeeds. Local developers often run
-    # pytest as a normal user; creating system accounts then fails with EPERM.
+    # CI runs these jobs as root so user.add succeeds. Local developers often
+    # run pytest as a normal user; creating system accounts then fails with
+    # EPERM.
     if (
-        salt.utils.platform.is_linux()
+        (salt.utils.platform.is_linux() or salt.utils.platform.is_darwin())
         and hasattr(os, "geteuid")
         and os.geteuid() != 0
         and os.environ.get("SALT_NETAPI_FORCE_NONROOT") != "1"
     ):
         pytest.skip(
-            "NetAPI integration tests require root on Linux to create/delete "
-            "system accounts (user.add). Re-run with sudo or set "
-            "SALT_NETAPI_FORCE_NONROOT=1 to force an attempt (will likely error)."
+            "NetAPI integration tests require root on Linux and macOS to "
+            "create/delete system accounts (user.add). Re-run with sudo or set "
+            "SALT_NETAPI_FORCE_NONROOT=1 to force an attempt (will likely "
+            "error)."
         )
     with salt_netapi_account_factory as account:
         yield account

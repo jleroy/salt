@@ -20,7 +20,6 @@ import salt.modules.test as test_mod
 import salt.syspaths
 import salt.utils.crypt
 import salt.utils.jid
-import salt.utils.platform
 import salt.utils.process
 import salt.utils.state
 from salt._compat import ipaddress
@@ -2052,15 +2051,14 @@ async def test_connect_master_general_exception_error(minion_opts, connect_maste
     assert minion.connect_master.calls == 2
 
 
-async def test_minion_manager_async_stop(io_loop, minion_opts, tmp_path):
+@pytest.mark.no_blocking(threshold=0.1)
+async def test_minion_manager_async_stop(io_loop, minion_opts, socket_tmp_path):
     """
     Ensure MinionManager's stop method works correctly and calls the
     stop_async method
     """
-    # Setup sock_dir with short path
-    minion_opts["sock_dir"] = str(tmp_path / "sock")
 
-    os.makedirs(minion_opts["sock_dir"])
+    minion_opts["sock_dir"] = str(socket_tmp_path)
 
     # Create a MinionManager instance with a mock minion
     mm = salt.minion.MinionManager(minion_opts)
@@ -2078,8 +2076,11 @@ async def test_minion_manager_async_stop(io_loop, minion_opts, tmp_path):
     # mm.io_loop is now an asyncio.AbstractEventLoop (not Tornado IOLoop)
     assert mm.io_loop.is_running()
 
-    # Wait for the ipc socket to be created, meaning the publish server is listening.
-    while not list(pathlib.Path(minion_opts["sock_dir"]).glob("*")):
+    # Wait for the *pull* ipc socket to be created, meaning the publish server
+    # is listening for pushes. Globbing for any file is not enough: the pub
+    # socket can appear first, letting the test fire before the pull socket
+    # exists, so the pusher's connect fails with StreamClosedError (Linux).
+    while not list(pathlib.Path(minion_opts["sock_dir"]).glob("*_pull.ipc")):
         await tornado.gen.sleep(0.3)
 
     # Set up values for event to send
@@ -2116,7 +2117,7 @@ async def test_minion_manager_async_stop(io_loop, minion_opts, tmp_path):
 
 
 async def test_minion_manager_destroy_closes_event_publisher(
-    io_loop, minion_opts, tmp_path
+    io_loop, minion_opts, socket_tmp_path
 ):
     """
     Regression test for issue #70175.
@@ -2136,33 +2137,41 @@ async def test_minion_manager_destroy_closes_event_publisher(
     signal handler) used to close these; ``destroy()`` did not, so any
     non-SIGTERM exit leaked them.
     """
-    minion_opts["sock_dir"] = str(tmp_path / "sock")
-    os.makedirs(minion_opts["sock_dir"])
+    # Keep UNIX socket paths below the macOS length limit.
+    minion_opts["sock_dir"] = str(socket_tmp_path)
 
     mm = salt.minion.MinionManager(minion_opts)
-    mm._bind()
-    assert mm.event_publisher is not None
-    assert mm.event is not None
+    try:
+        mm._bind()
+        assert mm.event_publisher is not None
+        assert mm.event is not None
 
-    # Wait for pub server to bind so the underlying PublishServer graph
-    # is fully constructed.
-    while not list(pathlib.Path(minion_opts["sock_dir"]).glob("*")):
-        await tornado.gen.sleep(0.1)
+        # Wait for the publisher's sockets, not unrelated files in the directory.
+        ep = mm.event_publisher
+        ev = mm.event
+        deadline = time.monotonic() + 5
+        while not all(
+            pathlib.Path(path).exists() for path in (ep.pub_path, ep.pull_path)
+        ):
+            if time.monotonic() >= deadline:
+                pytest.fail(
+                    f"EventPublisher sockets did not appear in {socket_tmp_path}"
+                )
+            await asyncio.sleep(0.1)
 
-    ep = mm.event_publisher
-    ev = mm.event
+        # Call destroy directly (the buggy path). It must close both
+        # resources and null the references.
+        mm.destroy()
 
-    # Call destroy directly (the buggy path).  Post-fix it must close
-    # both resources and null the references.
-    mm.destroy()
-
-    assert mm.event_publisher is None
-    assert mm.event is None
-    # PublishServer.close() sets _closing=True so __del__ won't warn.
-    assert ep._closing is True
-    # SaltEvent.destroy() closes pusher / subscriber and clears them.
-    assert ev.subscriber is None
-    assert ev.pusher is None
+        assert mm.event_publisher is None
+        assert mm.event is None
+        # PublishServer.close() sets _closing=True so __del__ won't warn.
+        assert ep._closing is True
+        # SaltEvent.destroy() closes pusher / subscriber and clears them.
+        assert ev.subscriber is None
+        assert ev.pusher is None
+    finally:
+        mm.destroy()
 
 
 def test_minion_io_loop_is_asyncio_loop(minion_opts):

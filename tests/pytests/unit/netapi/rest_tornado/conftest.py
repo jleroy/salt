@@ -3,7 +3,7 @@ import sys
 import pytest
 
 import salt.netapi.rest_tornado.saltnado as saltnado
-from tests.support.mock import MagicMock
+from tests.support.mock import MagicMock, patch
 
 
 @pytest.fixture
@@ -49,4 +49,14 @@ def salt_api_handler(io_loop, app_mock):
     # io_loop is requested first so the fresh loop is current before the
     # handler is constructed, matching the setUp ordering the legacy
     # AsyncTestCase suite relied on.
-    return saltnado.SaltAPIHandler(app_mock, app_mock)
+    # These tests exercise coroutine ordering, not client setup or key discovery.
+    # Real clients and key loaders add unrelated work to timed asyncio callbacks
+    # and leave RunnerClient instances awaiting cleanup between tests.
+    with patch("salt.client.get_local_client", autospec=True), patch(
+        "salt.runner.RunnerClient", autospec=True
+    ), patch("salt.utils.minions.CkMinions", autospec=True) as ckminions:
+        ckminions.return_value.check_minions.return_value = {
+            "minions": [],
+            "missing": [],
+        }
+        yield saltnado.SaltAPIHandler(app_mock, app_mock)

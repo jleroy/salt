@@ -184,6 +184,7 @@ def test_script_args_with_space(modules, echo_script_with_space, args, expected)
     assert result["stdout"] == expected
 
 
+@pytest.mark.skip_if_not_root
 @pytest.mark.parametrize(
     "args, expected",
     [
@@ -207,6 +208,7 @@ def test_script_args_runas(modules, account, echo_script, args, expected):
     assert result["stdout"] == expected
 
 
+@pytest.mark.skip_if_not_root
 @pytest.mark.parametrize(
     "args, expected",
     [
@@ -238,7 +240,8 @@ def test_run_pipe_python_shell_true(modules, pipe_script):
     else:
         cmd = f"{str(pipe_script)} | wc -l"
     result = modules.cmd.run(cmd, python_shell=True)
-    assert result == "1"
+    # macOS wc -l pads its output with leading spaces, unlike GNU wc.
+    assert result.strip() == "1"
 
 
 def test_run_pipe_python_shell_false(modules, pipe_script):
@@ -263,7 +266,8 @@ def test_run_pipe_default(modules, pipe_script):
     # Normally this is populated when run from the CLI, but when run from the
     # test suite, the value is empty
     result = modules.cmd.run(cmd, __pub_jid="test")
-    assert result == "1"
+    # macOS wc -l pads its output with leading spaces, unlike GNU wc.
+    assert result.strip() == "1"
 
 
 def test_run_pipe_shell(modules, pipe_script):
@@ -277,7 +281,8 @@ def test_run_pipe_shell(modules, pipe_script):
     # Normally this is populated when run from the CLI, but when run from the
     # test suite, the value is empty
     result = modules.cmd.run(cmd, shell=shell, __pub_jid="test")
-    assert result == "1"
+    # macOS wc -l pads its output with leading spaces, unlike GNU wc.
+    assert result.strip() == "1"
 
 
 def test_run_spaces(modules, pipe_script_with_space):
@@ -286,6 +291,7 @@ def test_run_spaces(modules, pipe_script_with_space):
     assert result == "fine"
 
 
+@pytest.mark.skip_if_not_root
 def test_run_spaces_runas(modules, pipe_script_with_space_runas, account):
     cmd = _cmd_path_for_run(pipe_script_with_space_runas)
     result = modules.cmd.run(

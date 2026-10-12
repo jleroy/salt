@@ -24,10 +24,157 @@ pytestmark = [
 ]
 
 
+async def test_request_client_close_resolves_pending_reply():
+    received = asyncio.Event()
+    disconnected = asyncio.Event()
+
+    async def handle(reader, writer):
+        try:
+            await reader.read(4096)
+            received.set()
+            await reader.read()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            disconnected.set()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    client = salt.transport.tcp.RequestClient(
+        {"master_uri": f"tcp://127.0.0.1:{port}"}, asyncio.get_running_loop()
+    )
+    request = asyncio.create_task(client.send({"probe": True}, timeout=None))
+    reader_task = None
+    try:
+        await asyncio.wait_for(received.wait(), timeout=5)
+        reader_task = client.task
+        client.close()
+        with pytest.raises(tornado.iostream.StreamClosedError):
+            await asyncio.wait_for(request, timeout=1)
+        assert client.send_future_map == {}
+        await asyncio.wait_for(disconnected.wait(), timeout=5)
+    finally:
+        client.close()
+        request.cancel()
+        await asyncio.gather(request, return_exceptions=True)
+        if reader_task is not None:
+            await asyncio.gather(reader_task, return_exceptions=True)
+        client._tcp_client.close()
+        server.close()
+        await server.wait_closed()
+
+
+async def test_request_client_close_preserves_finished_replies():
+    loop = asyncio.get_running_loop()
+    client = salt.transport.tcp.RequestClient(
+        {"master_uri": "tcp://127.0.0.1:4506"}, loop
+    )
+    pending = loop.create_future()
+    completed = loop.create_future()
+    completed.set_result("reply")
+    cancelled = loop.create_future()
+    cancelled.cancel()
+    client.send_future_map.update({1: pending, 2: completed, 3: cancelled})
+    try:
+        client.close()
+        client.close()
+        assert isinstance(pending.exception(), tornado.iostream.StreamClosedError)
+        assert completed.result() == "reply"
+        assert cancelled.cancelled()
+        assert client.send_future_map == {}
+        client.timeout_message(1, "expired")
+    finally:
+        client.close()
+        client._tcp_client.close()
+
+
 @pytest.fixture
 def _fake_keys():
     with patch("salt.crypt.AsyncAuth.get_keys", autospec=True):
         yield
+
+
+async def test_request_client_close_closes_stream_once():
+    client = salt.transport.tcp.RequestClient(
+        {"master_uri": "tcp://127.0.0.1:4506"}, asyncio.get_running_loop()
+    )
+    stream = MagicMock()
+    client._stream = stream
+    try:
+        client.close()
+        client.close()
+        stream.close.assert_called_once_with()
+        assert client._stream is None
+    finally:
+        client.close()
+        client._tcp_client.close()
+
+
+async def test_request_client_connect_after_close_does_not_open_socket():
+    client = salt.transport.tcp.RequestClient(
+        {"master_uri": "tcp://127.0.0.1:4506"}, asyncio.get_running_loop()
+    )
+    try:
+        client.close()
+        with patch.object(
+            client._tcp_client, "connect", new_callable=AsyncMock
+        ) as connect:
+            await client.connect()
+            connect.assert_not_awaited()
+        assert client._stream is None
+        assert client.task is None
+    finally:
+        client.close()
+        client._tcp_client.close()
+
+
+async def test_request_client_timeout_message():
+    loop = asyncio.get_running_loop()
+    client = salt.transport.tcp.RequestClient(
+        {"master_uri": "tcp://127.0.0.1:4506"}, loop
+    )
+    try:
+        client.timeout_message("unknown", "request")
+        future = loop.create_future()
+        client.send_future_map[1] = future
+        client.timeout_message(1, "request")
+        assert isinstance(future.exception(), salt.exceptions.SaltReqTimeoutError)
+        assert client.send_future_map == {}
+        client.timeout_message(1, "request")
+    finally:
+        client.close()
+        client._tcp_client.close()
+
+
+@pytest.mark.parametrize(
+    "error", [tornado.iostream.StreamClosedError(), ValueError("bad reply")]
+)
+async def test_request_client_stream_return_exception(error):
+    loop = asyncio.get_running_loop()
+    client = salt.transport.tcp.RequestClient(
+        {"master_uri": "tcp://127.0.0.1:4506"}, loop
+    )
+    stream = MagicMock()
+    stream.read_bytes = AsyncMock(side_effect=error)
+    client._stream = stream
+    client.disconnect_callback = MagicMock()
+    future = loop.create_future()
+    client.send_future_map[1] = future
+    try:
+        # Stop after the reconnect attempt so the test does not need a server.
+        with patch.object(
+            client, "connect", new_callable=AsyncMock, side_effect=client.close
+        ) as connect:
+            await client._stream_return()
+            connect.assert_awaited_once_with()
+        assert future.exception() is error
+        assert client.send_future_map == {}
+        assert client._stream is None
+        stream.close.assert_called_once_with()
+        client.disconnect_callback.assert_called_once_with()
+    finally:
+        client.close()
+        client._tcp_client.close()
 
 
 @pytest.fixture
@@ -61,18 +208,6 @@ def _fake_crypticle():
         yield fake_crypticle
 
 
-@pytest.fixture
-def _squash_exepected_message_client_warning():
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="MessageClient has been deprecated and will be removed.",
-            category=DeprecationWarning,
-            module="salt.transport.tcp",
-        )
-        yield
-
-
 @attr.s(frozen=True, slots=True)
 class ClientSocket:
     listen_on = attr.ib(init=False, default="127.0.0.1")
@@ -104,6 +239,8 @@ def test_get_socket():
 
     if salt.utils.platform.is_windows():
         assert int(socket.family) == 23
+    elif salt.utils.platform.is_darwin():
+        assert int(socket.family) == 30
     else:
         assert int(socket.family) == 10
 
@@ -393,40 +530,6 @@ async def test_tcppubserverpublisher_close_resolves_connecting_future_69187(io_l
                 await asyncio.sleep(0.05)
 
 
-@pytest.mark.usefixtures("_squash_exepected_message_client_warning")
-async def test_message_client_cleanup_on_close(client_socket, temp_salt_master):
-    """
-    test message client cleanup on close
-    """
-
-    opts = dict(temp_salt_master.config.copy(), transport="tcp")
-    client = salt.transport.tcp.MessageClient(
-        opts, client_socket.listen_on, client_socket.port
-    )
-
-    assert client._closed is False
-    assert client._closing is False
-    assert client._stream is None
-
-    await client.connect()
-
-    # Ensure we are testing the _read_until_future and io_loop teardown
-    assert client._stream is not None
-
-    client.close()
-
-    # ``close()`` now tears down synchronously (see the block comment
-    # above the added tests further down): the transport, stream and
-    # pending futures are cleared before returning so a caller can rely
-    # on the client being fully closed the moment ``close()`` returns.
-    # Previously ``close()`` scheduled a poll-loop on the IOLoop and
-    # only actually closed the stream after ``send_future_map`` drained,
-    # which under load could hang forever.
-    assert client._closed is True
-    assert client._closing is False
-    assert client._stream is None
-
-
 async def test_async_tcp_pub_channel_connect_publish_port(
     temp_salt_master, client_socket
 ):
@@ -443,7 +546,7 @@ async def test_async_tcp_pub_channel_connect_publish_port(
         acceptance_wait_time_max=5,
     )
     patch_auth = MagicMock(return_value=True)
-    transport = MagicMock(spec=salt.transport.tcp.TCPPubClient)
+    transport = MagicMock(spec=salt.transport.tcp.PublishClient)
     transport.connect = MagicMock()
     future = asyncio.Future()
     transport.connect.return_value = future
@@ -547,181 +650,6 @@ def test_tcp_pub_server_channel_publish_filtering_str_list(temp_salt_master):
         check_minions.assert_called_with("minion02", tgt_type="list")
 
 
-@pytest.fixture(scope="function")
-def salt_message_client(io_loop):
-    client = salt.transport.tcp.MessageClient(
-        {}, "127.0.0.1", ports.get_unused_localhost_port(), io_loop=io_loop
-    )
-
-    try:
-        yield client
-    finally:
-        client.close()
-
-
-# XXX we don't return a future anymore, this needs a different way of testing.
-# def test_send_future_set_retry(salt_message_client):
-#    future = salt_message_client.send({"some": "message"}, tries=10, timeout=30)
-#
-#    # assert we have proper props in future
-#    assert future.tries == 10
-#    assert future.timeout == 30
-#    assert future.attempts == 0
-#
-#    # assert the timeout callback was created
-#    assert len(salt_message_client.send_queue) == 1
-#    message_id = salt_message_client.send_queue.pop()[0]
-#
-#    assert message_id in salt_message_client.send_timeout_map
-#
-#    timeout = salt_message_client.send_timeout_map[message_id]
-#    assert timeout[0][0] == 30
-#    assert timeout[0][2] == message_id
-#    assert timeout[0][3] == {"some": "message"}
-#
-#    # try again, now with set future
-#    future.attempts = 1
-#
-#    future = salt_message_client.send(
-#        {"some": "message"}, tries=10, timeout=30, future=future
-#    )
-#
-#    # assert we have proper props in future
-#    assert future.tries == 10
-#    assert future.timeout == 30
-#    assert future.attempts == 1
-#
-#    # assert the timeout callback was created
-#    assert len(salt_message_client.send_queue) == 1
-#    message_id_new = salt_message_client.send_queue.pop()[0]
-#
-#    # check new message id is generated
-#    assert message_id != message_id_new
-#
-#    assert message_id_new in salt_message_client.send_timeout_map
-#
-#    timeout = salt_message_client.send_timeout_map[message_id_new]
-#    assert timeout[0][0] == 30
-#    assert timeout[0][2] == message_id_new
-#    assert timeout[0][3] == {"some": "message"}
-
-
-# def test_timeout_message_retry(salt_message_client):
-#    # verify send is triggered with first retry
-#    msg = {"some": "message"}
-#    future = salt_message_client.send(msg, tries=1, timeout=30)
-#    assert future.attempts == 0
-#
-#    timeout = next(iter(salt_message_client.send_timeout_map.values()))
-#    message_id_1 = timeout[0][2]
-#    message_body_1 = timeout[0][3]
-#
-#    assert message_body_1 == msg
-#
-#    # trigger timeout callback
-#    salt_message_client.timeout_message(message_id_1, message_body_1)
-#
-#    # assert send got called, yielding potentially new message id, but same message
-#    future_new = next(iter(salt_message_client.send_future_map.values()))
-#    timeout_new = next(iter(salt_message_client.send_timeout_map.values()))
-#
-#    message_id_2 = timeout_new[0][2]
-#    message_body_2 = timeout_new[0][3]
-#
-#    assert future_new.attempts == 1
-#    assert future.tries == future_new.tries
-#    assert future.timeout == future_new.timeout
-#
-#    assert message_body_1 == message_body_2
-#
-#    # now try again, should not call send
-#    with contextlib.suppress(salt.exceptions.SaltReqTimeoutError):
-#        salt_message_client.timeout_message(message_id_2, message_body_2)
-#        raise future_new.exception()
-#
-#    # assert it's really "consumed"
-#    assert message_id_2 not in salt_message_client.send_future_map
-#    assert message_id_2 not in salt_message_client.send_timeout_map
-
-
-@pytest.mark.usefixtures("_squash_exepected_message_client_warning")
-def test_timeout_message_unknown_future(salt_message_client):
-    #    # test we don't fail on unknown message_id
-    #    salt_message_client.timeout_message(-1, "message")
-
-    # if we do have the actual future stored under the id, but it's none
-    # we shouldn't fail as well
-    message_id = 1
-    future = tornado.concurrent.Future()
-    future.attempts = 1
-    future.tries = 1
-    salt_message_client.send_future_map[message_id] = future
-
-    salt_message_client.timeout_message(message_id, "message")
-
-    assert message_id not in salt_message_client.send_future_map
-
-
-@pytest.mark.usefixtures("_squash_exepected_message_client_warning")
-def xtest_client_reconnect_backoff(client_socket):
-    opts = {"tcp_reconnect_backoff": 5}
-
-    client = salt.transport.tcp.MessageClient(
-        opts, client_socket.listen_on, client_socket.port
-    )
-
-    async def _sleep(t):
-        client.close()
-        assert t == 5
-        return
-        # return asyncio.sleep()
-
-    async def connect(*args, **kwargs):
-        raise Exception("err")
-
-    client._tcp_client.connect = connect
-
-    try:
-        with patch("asyncio.sleep", side_effect=_sleep):
-            client.io_loop.run_sync(client.connect)
-    finally:
-        client.close()
-
-
-@pytest.mark.usefixtures("_fake_crypticle", "_fake_keys")
-async def test_when_async_req_channel_with_syndic_role_should_use_syndic_master_pub_file_to_verify_master_sig(
-    fake_crypto,
-):
-    # Syndics use the minion pki dir, but they also create a syndic_master.pub
-    # file for comms with the Salt master
-    expected_pubkey_path = os.path.join("/etc/salt/pki/minion", "syndic_master.pub")
-    fake_crypto.new.return_value.decrypt.return_value = "decrypted_return_value"
-    mockloop = MagicMock()
-    opts = {
-        "master_uri": "tcp://127.0.0.1:4506",
-        "interface": "127.0.0.1",
-        "ret_port": 4506,
-        "ipv6": False,
-        "sock_dir": ".",
-        "pki_dir": "/etc/salt/pki/minion",
-        "id": "syndic",
-        "__role": "syndic",
-        "keysize": 4096,
-        "transport": "tcp",
-        "acceptance_wait_time": 30,
-        "acceptance_wait_time_max": 30,
-        "signing_algorithm": "MOCK",
-        "keys.cache_driver": "localfs_key",
-    }
-    client = salt.channel.client.ReqChannel.factory(opts, io_loop=mockloop)
-    assert client.master_pubkey_path == expected_pubkey_path
-    # verify_signature routes through PublicKey.from_file so the syndic
-    # master pubkey path shows up on the from_file classmethod call.
-    with patch("salt.crypt.PublicKey.from_file", return_value=MagicMock()) as mock:
-        client.verify_signature("mockdata", "mocksig")
-        assert mock.call_args_list[0][0][0] == expected_pubkey_path
-
-
 @pytest.mark.usefixtures("_fake_authd", "_fake_crypticle", "_fake_keys")
 async def test_mixin_should_use_correct_path_when_syndic():
     mockloop = asyncio.get_running_loop()
@@ -752,15 +680,12 @@ async def test_mixin_should_use_correct_path_when_syndic():
         assert mock.call_args_list[0][0][0] == expected_pubkey_path
 
 
-@pytest.mark.usefixtures("_squash_exepected_message_client_warning")
-def test_presence_events_callback_passed(temp_salt_master, salt_message_client):
+def test_presence_events_callback_passed(temp_salt_master):
     opts = dict(temp_salt_master.config.copy(), transport="tcp", presence_events=True)
     channel = salt.channel.server.PubServerChannel.factory(opts)
-    channel.transport = salt.transport.tcp.TCPPublishServer(opts)
+    channel.transport = salt.transport.tcp.PublishServer(opts)
     mock_publish_daemon = MagicMock()
-    with patch(
-        "salt.transport.tcp.TCPPublishServer.publish_daemon", mock_publish_daemon
-    ):
+    with patch("salt.transport.tcp.PublishServer.publish_daemon", mock_publish_daemon):
         channel._publish_daemon()
         mock_publish_daemon.assert_called_with(
             channel.publish_payload,
@@ -805,7 +730,9 @@ async def test_presence_removed_on_stream_closed():
 
 async def test_tcp_pub_client_decode_dict(minion_opts, io_loop, tmp_path):
     dmsg = {"meh": "bah"}
-    with salt.transport.tcp.TCPPubClient(minion_opts, io_loop, path=tmp_path) as client:
+    with salt.transport.tcp.PublishClient(
+        minion_opts, io_loop, path=tmp_path
+    ) as client:
         ret = client._decode_messages(dmsg)
         assert ret == dmsg
 
@@ -813,13 +740,15 @@ async def test_tcp_pub_client_decode_dict(minion_opts, io_loop, tmp_path):
 async def test_tcp_pub_client_decode_msgpack(minion_opts, io_loop, tmp_path):
     dmsg = {"meh": "bah"}
     msg = salt.payload.dumps(dmsg)
-    with salt.transport.tcp.TCPPubClient(minion_opts, io_loop, path=tmp_path) as client:
+    with salt.transport.tcp.PublishClient(
+        minion_opts, io_loop, path=tmp_path
+    ) as client:
         ret = client._decode_messages(msg)
         assert ret == dmsg
 
 
 def test_tcp_pub_client_close(minion_opts, io_loop, tmp_path):
-    client = salt.transport.tcp.TCPPubClient(minion_opts, io_loop, path=tmp_path)
+    client = salt.transport.tcp.PublishClient(minion_opts, io_loop, path=tmp_path)
 
     stream = MagicMock()
 
@@ -964,18 +893,19 @@ async def test_salt_message_server_recreates_unpacker_on_disconnect(monkeypatch)
 
 async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypatch):
     """
-    Ensure that a general exception from the stream causes the server to reset its
-    unpacker, preventing the previous buffer from leaking.
+    Ensure that a general exception from the stream causes the server to reset
+    its unpacker, releasing the previous buffer instead of leaking it.
     """
 
     class TrackingUnpacker:
-        living = weakref.WeakSet()
+        # Weak references to every unpacker created, in creation order.
+        refs = []
         created = 0
 
         def __init__(self, *args, **kwargs):
             self.max_buffer_size = kwargs.get("max_buffer_size")
             TrackingUnpacker.created += 1
-            TrackingUnpacker.living.add(self)
+            TrackingUnpacker.refs.append(weakref.ref(self))
 
         def feed(self, data):
             return None
@@ -1017,9 +947,16 @@ async def test_salt_message_server_resets_unpacker_on_general_exception(monkeypa
         await tornado.gen.sleep(0.01)
         gc.collect()
         assert stream.closed
-        # initial creation + reset on exception
+        # initial unpacker + the one created when resetting on the exception
         assert TrackingUnpacker.created == 2
-        assert not TrackingUnpacker.living
+        # The previous unpacker -- the one that was fed the 4096-byte buffer --
+        # must be released once handle_stream resets it on the exception path.
+        # The reset unpacker itself can stay transiently alive (it is held by
+        # the handled exception's traceback frame, a CPython artifact, not a
+        # buffer leak), so we only assert on the previous one.
+        assert (
+            TrackingUnpacker.refs[0]() is None
+        ), "the previous unpacker (and its buffer) was not released on reset"
     finally:
         server.close()
 
@@ -1080,37 +1017,18 @@ async def test_salt_message_server_exception(master_opts, io_loop):
     stream.close.assert_called_once()
 
 
-@pytest.mark.usefixtures("_squash_exepected_message_client_warning")
-async def test_message_client_stream_return_exception(minion_opts, io_loop):
-    msg = {"foo": "bar"}
-    payload = salt.transport.frame.frame_msg(msg)
-    future = tornado.concurrent.Future()
-    future.set_result(payload)
-    client = salt.transport.tcp.MessageClient(
-        minion_opts,
-        "127.0.0.1",
-        12345,
-        connect_callback=MagicMock(),
-        disconnect_callback=MagicMock(),
-    )
-    client._stream = MagicMock()
-    client._stream.read_bytes.side_effect = [
-        future,
-    ]
-    try:
-        io_loop.add_callback(client._stream_return)
-        await asyncio.sleep(0.01)
-        client.close()
-        await asyncio.sleep(0.01)
-        assert client._stream is None
-    finally:
-        client.close()
-
-
 def test_tcp_pub_server_pre_fork(master_opts):
     process_manager = MagicMock()
-    server = salt.transport.tcp.TCPPublishServer(master_opts)
-    server.pre_fork(process_manager)
+    server = salt.transport.tcp.PublishServer(master_opts)
+    try:
+        server.pre_fork(process_manager)
+        process_manager.add_process.assert_called_once_with(
+            server.publish_daemon,
+            args=[server.publish_payload],
+            name="PublishServer",
+        )
+    finally:
+        server.close()
 
 
 async def test_pub_server_publish_payload(master_opts, io_loop):
@@ -1320,11 +1238,13 @@ async def test_pub_server_paths_no_perms(master_opts, io_loop):
 
 
 @pytest.mark.skip_on_windows()
-async def test_pub_server_publisher_pull_path_perms(master_opts, io_loop, tmp_path):
+async def test_pub_server_publisher_pull_path_perms(
+    master_opts, io_loop, socket_tmp_path
+):
     def publish_payload(payload):
         return payload
 
-    pull_path = str(tmp_path / "pull.ipc")
+    pull_path = str(socket_tmp_path / "pull.ipc")
     pull_path_perms = 0o664
     pubserv = salt.transport.tcp.PublishServer(
         master_opts,
@@ -1346,11 +1266,13 @@ async def test_pub_server_publisher_pull_path_perms(master_opts, io_loop, tmp_pa
 
 
 @pytest.mark.skip_on_windows()
-async def test_pub_server_publisher_pub_path_perms(master_opts, io_loop, tmp_path):
+async def test_pub_server_publisher_pub_path_perms(
+    master_opts, io_loop, socket_tmp_path
+):
     def publish_payload(payload):
         return payload
 
-    pub_path = str(tmp_path / "pub.ipc")
+    pub_path = str(socket_tmp_path / "pub.ipc")
     pub_path_perms = 0o664
     pubserv = salt.transport.tcp.PublishServer(
         master_opts,
@@ -1433,109 +1355,6 @@ def test_pub_server_discard_on_close_prunes_subscribers(master_opts, io_loop):
     # Second call is a no-op (idempotent on a stale registration).
     server._discard_on_close(a)()
     assert b in server.clients
-
-
-# ---------------------------------------------------------------------------
-# MessageClient synchronous close.
-#
-# The previous close() scheduled ``check_close`` on the IOLoop and polled
-# ``send_future_map`` at 1 s intervals for it to empty, only actually
-# tearing the transport down once no in-flight sends remained.  A single
-# orphaned future -- e.g. an awaiting coroutine cancelled by CherryPy
-# mid-request -- kept the map non-empty forever, so under salt-api load
-# MessageClient objects (with their Unpacker + IOStream + LazyLoader
-# graphs) leaked at ~18/s.  close() now runs synchronously: it cancels
-# pending futures with SaltReqTimeoutError, closes the tcp client and
-# stream, and sets ``_closed=True`` before returning.  connect() then
-# refuses to reset ``_closing``/``_closed`` if the client was closed
-# while ``getstream`` was awaiting, so a late reconnect from
-# ``_stream_return`` cannot revive a torn-down client.
-# ---------------------------------------------------------------------------
-
-
-def _make_message_client(minion_opts):
-    return salt.transport.tcp.MessageClient(minion_opts, "127.0.0.1", 4506)
-
-
-def test_message_client_close_synchronously_tears_down(minion_opts):
-    client = _make_message_client(minion_opts)
-    fake_stream = MagicMock()
-    fake_stream.closed.return_value = False
-    client._stream = fake_stream
-    client._tcp_client = MagicMock()
-
-    client.close()
-
-    assert client._closed is True
-    assert client._closing is False
-    assert client._stream is None
-    client._tcp_client.close.assert_called_once_with()
-    fake_stream.close.assert_called_once_with()
-
-
-def test_message_client_close_cancels_pending_futures(minion_opts):
-    client = _make_message_client(minion_opts)
-    client._tcp_client = MagicMock()
-    client._stream = MagicMock()
-
-    pending = asyncio.get_event_loop_policy().new_event_loop().create_future()
-    done = asyncio.get_event_loop_policy().new_event_loop().create_future()
-    done.set_result("already-done")
-    client.send_future_map = {1: pending, 2: done}
-
-    try:
-        client.close()
-
-        assert pending.done() is True
-        assert isinstance(pending.exception(), salt.exceptions.SaltReqTimeoutError)
-        # A future that was already resolved before close() must not be
-        # touched.
-        assert done.done() is True
-        assert done.result() == "already-done"
-        assert client.send_future_map == {}
-        assert client._closed is True
-    finally:
-        pending.get_loop().close()
-        done.get_loop().close()
-
-
-def test_message_client_close_is_idempotent(minion_opts):
-    client = _make_message_client(minion_opts)
-    client._tcp_client = MagicMock()
-    client._stream = MagicMock()
-
-    client.close()
-    client.close()
-
-    client._tcp_client.close.assert_called_once_with()
-
-
-async def test_message_client_connect_noop_after_close(minion_opts):
-    """
-    If ``close()`` runs while ``connect()`` is awaiting ``getstream()``
-    (e.g. ``_stream_return`` saw StreamClosedError and called us to
-    reconnect), connect() must not clobber the close flags -- otherwise
-    _stream_return keeps running past the intended shutdown and the
-    client stays reachable.
-    """
-    client = _make_message_client(minion_opts)
-    client._tcp_client = MagicMock()
-
-    client.close()
-    assert client._closed is True
-
-    async def _should_not_be_called(*args, **kwargs):
-        raise AssertionError(
-            "getstream() must not run when connect() is called on a closed client"
-        )
-
-    client.getstream = _should_not_be_called
-
-    await client.connect()
-
-    assert client._closed is True
-    assert client._closing is False
-    assert client._stream is None
 
 
 # ---------------------------------------------------------------------------

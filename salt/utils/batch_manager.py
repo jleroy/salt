@@ -182,10 +182,8 @@ class BatchManager(salt.utils.process.SignalHandlingProcess):
 
         Two paths:
 
-        * **Async** (``driver="master"``) — the async CLI path writes
-          ``.batch.p`` itself (it runs ``run_job`` first, so the
-          master has already created the JID directory with the right
-          ownership) and then fires ``salt/batch/<jid>/new`` with no
+        * **Async** (``driver="master"``) — the authenticated master
+          publication path persists the pending batch and then fires ``salt/batch/<jid>/new`` with no
           ``state`` field.  This handler reads from disk to confirm
           and adopts the JID into the in-memory active set.
         * **Sync CLI** (``driver="cli"``) — the sync CLI cannot

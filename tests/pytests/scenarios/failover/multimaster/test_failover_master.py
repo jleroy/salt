@@ -4,6 +4,7 @@ import shutil
 import time
 
 import pytest
+from pytestshellutils.exceptions import FactoryTimeout
 
 from tests.conftest import FIPS_TESTRUN
 
@@ -20,7 +21,7 @@ _FAILOVER_DISCONNECT_EVENT_TIMEOUT_MULT = 8  # was 4 × master_alive_interval
 _FAILOVER_POST_MASTER_GRACE_SEC = 30  # was 10; masters need sockets + workers ready
 _FAILOVER_RECONNECT_DEADLINE_SEC = 600  # was 300
 _FAILOVER_RECONNECT_POLL_SEC = 8  # was 5
-_FAILOVER_CLI_PING_TIMEOUT_SEC = 20  # was 10; per salt CLI subprocess
+_FAILOVER_CLI_PING_TIMEOUT_SEC = 20  # Salt CLI timeout; process gets a startup margin
 
 
 def test_pki(salt_mm_failover_master_1, salt_mm_failover_master_2, caplog):
@@ -212,16 +213,19 @@ def test_minions_alive_with_no_master(
             success = False
             for cli in clis:
                 try:
+                    # A minion may have reconnected to the other master. Bound
+                    # both CLI and process waits so polling can try that master.
                     ret = cli.run(
+                        f"--timeout={_FAILOVER_CLI_PING_TIMEOUT_SEC}",
                         "test.ping",
                         minion_tgt=minion.id,
-                        _timeout=_FAILOVER_CLI_PING_TIMEOUT_SEC,
+                        _timeout=_FAILOVER_CLI_PING_TIMEOUT_SEC + 20,
                     )
                     if ret.returncode == 0 and ret.data is True:
                         log.debug(f"Minion {minion.id} reconnected to {cli.id}")
                         success = True
                         break
-                except (RuntimeError, ValueError) as exc:
+                except (FactoryTimeout, RuntimeError, ValueError) as exc:
                     log.debug(f"Error pinging {minion.id} from {cli.id}: {exc}")
             if not success:
                 still_waiting.append(minion.id)

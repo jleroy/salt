@@ -385,9 +385,9 @@ def test_batch_async_handoff_to_batch_manager(
     jid = _extract_async_jid(cmd.stdout)
     assert jid, f"could not find async batch JID in: {cmd.stdout!r}"
 
-    # ``.batch.p`` is written by the async CLI handoff before
-    # ``salt/batch/<jid>/new`` is fired and is left in place by the
-    # BatchManager — the file is the durable record of the batch.
+    # The master writes ``.batch.p`` before announcing the batch;
+    # BatchManager publishes the first lot after adoption and preserves
+    # the file as the durable record of the batch.
     state_path = _batch_state_path(salt_master, jid)
 
     def _state_exists():
@@ -421,6 +421,14 @@ def test_batch_async_handoff_to_batch_manager(
         f"BatchManager never retired async batch {jid} from the "
         f"active index within 60s"
     )
+
+    # Retirement alone also occurs on timeout; both fast replies must be counted.
+    import salt.utils.batch_state
+
+    state = salt.utils.batch_state.read_batch_state(jid, salt_master.config)
+    assert state is not None
+    assert set(state["done"]) == {salt_minion.id, salt_sub_minion.id}, state
+    assert not state["failed"], state
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 """
-This module allows you to manage assistive access on macOS minions with 10.9+
+This module allows you to manage assistive access on macOS minions with 11+
 
 .. versionadded:: 2016.3.0
 
@@ -8,7 +8,6 @@ This module allows you to manage assistive access on macOS minions with 10.9+
     salt '*' assistive.install /usr/bin/osascript
 """
 
-import hashlib
 import logging
 import sqlite3
 import time
@@ -32,8 +31,8 @@ def __virtual__():
     """
     if not salt.utils.platform.is_darwin():
         return False, "Must be run on macOS"
-    if Version(__grains__["osrelease"]) < Version("10.9"):
-        return False, "Must be run on macOS 10.9 or newer"
+    if Version(__grains__["osrelease"]) < Version("11"):
+        return False, "Must be run on macOS 11 or newer"
     return __virtualname__
 
 
@@ -184,30 +183,30 @@ class TccDB:
             path = TCC_DB_PATH
         self.path = path
         self.connection = None
-        self.ge_mojave_and_catalina = False
-        self.ge_bigsur_and_later = False
-        self.ge_sonoma_and_later = False
+        self.schema_version = None
 
-    def _check_table_digest(self):
-        # This logic comes from https://github.com/jacobsalmela/tccutil which is
-        # Licensed under GPL-2.0
-        cursor = self.connection.execute(
-            "SELECT sql FROM sqlite_master WHERE name='access' and type='table'"
-        )
-        for row in cursor.fetchall():
-            digest = hashlib.sha1(row["sql"].encode()).hexdigest()[:10]
-            if digest in ("ecc443615f", "80a4bb6912"):
-                # Mojave and Catalina
-                self.ge_mojave_and_catalina = True
-            elif digest in ("3d1c2a0e97", "cef70648de"):
-                # BigSur and later
-                self.ge_bigsur_and_later = True
-            elif digest in ("34abf99d20",):
-                self.ge_sonoma_and_later = True
-            else:
-                raise CommandExecutionError(
-                    f"TCC Database structure unknown for digest '{digest}'"
-                )
+    def _check_schema_version(self):
+        try:
+            row = self.connection.execute(
+                "SELECT value FROM admin WHERE key = 'version'"
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise CommandExecutionError(
+                "Unable to read TCC database schema version"
+            ) from exc
+        version = row["value"] if row is not None else None
+        # TCC versions describe the whole database. The supported access schemas
+        # start at 19 (Big Sur), 29 (Sonoma), and 36 (Golden Gate).
+        # Gaps correspond to versions not found in the examined macOS releases,
+        # presumably used only in internal Apple builds.
+        # See https://github.com/jacobsalmela/tccutil/issues/82
+        if not isinstance(version, int) or not (
+            19 <= version <= 27 or 29 <= version <= 32 or version >= 36
+        ):
+            raise CommandExecutionError(
+                f"Unsupported TCC database schema version: {version}"
+            )
+        self.schema_version = version
 
     def _get_client_type(self, app_id):
         if app_id[0] == "/":
@@ -229,162 +228,65 @@ class TccDB:
     def install(self, app_id, enable=True):
         client_type = self._get_client_type(app_id)
         auth_value = 1 if enable else 0
-        if self.ge_bigsur_and_later:
-            # CREATE TABLE IF NOT EXISTS "access" (
-            #   service        TEXT        NOT NULL,
-            #   client         TEXT        NOT NULL,
-            #   client_type    INTEGER     NOT NULL,
-            #   auth_value     INTEGER     NOT NULL,
-            #   auth_reason    INTEGER     NOT NULL,
-            #   auth_version   INTEGER     NOT NULL,
-            #   csreq          BLOB,     policy_id      INTEGER,
-            #   indirect_object_identifier_type    INTEGER,
-            #   indirect_object_identifier         TEXT NOT NULL DEFAULT 'UNUSED',
-            #   indirect_object_code_identity      BLOB,
-            #   flags          INTEGER,
-            #   last_modified  INTEGER     NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
-            #   PRIMARY KEY (
-            #       service,
-            #       client,
-            #       client_type,
-            #       indirect_object_identifier
-            #   ),
-            #   FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE ON UPDATE CASCADE);
-            self.connection.execute(
-                """
-                    INSERT or REPLACE INTO access VALUES (
-                        'kTCCServiceAccessibility',
-                        ?,
-                        ?,
-                        ?,
-                        4,
-                        1,
-                        NULL,
-                        NULL,
-                        0,
-                        'UNUSED',
-                        NULL,
-                        0,
-                        0
-                    )
-                    """,
-                (app_id, client_type, auth_value),
-            )
-            self.connection.commit()
-        elif self.ge_mojave_and_catalina:
-            # CREATE TABLE IF NOT EXISTS "access" (
-            #   service        TEXT        NOT NULL,
-            #   client         TEXT        NOT NULL,
-            #   client_type    INTEGER     NOT NULL,
-            #   allowed        INTEGER     NOT NULL,
-            #   prompt_count   INTEGER     NOT NULL,
-            #   csreq          BLOB,
-            #   policy_id      INTEGER,
-            #   indirect_object_identifier_type    INTEGER,
-            #   indirect_object_identifier         TEXT DEFAULT 'UNUSED',
-            #   indirect_object_code_identity      BLOB,
-            #   flags          INTEGER,
-            #   last_modified  INTEGER     NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
-            #   PRIMARY KEY (
-            #       service,
-            #       client,
-            #       client_type,
-            #       indirect_object_identifier
-            #   ),
-            #   FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE ON UPDATE CASCADE);
-            self.connection.execute(
-                """
-                    INSERT or REPLACE INTO access VALUES(
-                        'kTCCServiceAccessibility',
-                        ?,
-                        ?,
-                        ?,
-                        1,
-                        NULL,
-                        NULL,
-                        NULL,
-                        'UNUSED',
-                        NULL,
-                        0,
-                        0
-                    )
-                    """,
-                (app_id, client_type, auth_value),
-            )
-            self.connection.commit()
-        elif self.ge_sonoma_and_later:
-            # CREATE TABLE access (
-            #   service        TEXT        NOT NULL,
-            #   client         TEXT        NOT NULL,
-            #   client_type    INTEGER     NOT NULL,
-            #   auth_value     INTEGER     NOT NULL,
-            #   auth_reason    INTEGER     NOT NULL,
-            #   auth_version   INTEGER     NOT NULL,
-            #   csreq          BLOB,
-            #   policy_id      INTEGER,
-            #   indirect_object_identifier_type    INTEGER,
-            #   indirect_object_identifier         TEXT NOT NULL DEFAULT 'UNUSED',
-            #   indirect_object_code_identity      BLOB,
-            #   flags          INTEGER,
-            #   last_modified  INTEGER     NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
-            #   pid            INTEGER,
-            #   pid_version    INTEGER,
-            #   boot_uuid      TEXT NOT NULL DEFAULT 'UNUSED',
-            #   last_reminded  INTEGER     NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
-            #   PRIMARY KEY (service, client, client_type, indirect_object_identifier),
-            #   FOREIGN KEY (policy_id)
-            self.connection.execute(
-                """
-                    INSERT or REPLACE INTO access VALUES(
-                        'kTCCServiceAccessibility',
-                        ?,
-                        ?,
-                        ?,
-                        4,
-                        1,
-                        NULL,
-                        NULL,
-                        NULL,
-                        'UNUSED',
-                        NULL,
-                        0,
-                        0,
-                        0,
-                        0,
-                        'UNUSED',
-                        ?
-                    )
-                    """,
-                (app_id, client_type, auth_value, time.time()),
-            )
-            self.connection.commit()
+        columns = [
+            "service",
+            "client",
+            "client_type",
+            "auth_value",
+            "auth_reason",
+            "auth_version",
+            "csreq",
+            "policy_id",
+            "indirect_object_identifier_type",
+            "indirect_object_identifier",
+            "indirect_object_code_identity",
+            "flags",
+            "last_modified",
+        ]
+        values = [
+            "kTCCServiceAccessibility",
+            app_id,
+            client_type,
+            auth_value,
+            4,
+            1,
+            None,
+            None,
+            0 if self.schema_version <= 27 else None,
+            "UNUSED",
+            None,
+            0,
+            0,
+        ]
+        if self.schema_version >= 29:
+            columns.extend(["pid", "pid_version", "boot_uuid", "last_reminded"])
+            values.extend([0, 0, "UNUSED", time.time()])
+        if self.schema_version >= 36:
+            columns.extend(["one_time_reprompt_eligible", "reminder_count"])
+            values.extend([None, 0])
+        placeholders = ", ".join("?" for _ in columns)
+        self.connection.execute(
+            f"INSERT OR REPLACE INTO access ({', '.join(columns)}) VALUES ({placeholders})",
+            values,
+        )
+        self.connection.commit()
         return True
 
     def enabled(self, app_id):
-        if self.ge_bigsur_and_later or self.ge_sonoma_and_later:
-            column = "auth_value"
-        elif self.ge_mojave_and_catalina:
-            column = "allowed"
         cursor = self.connection.execute(
             "SELECT * from access WHERE client=? and service='kTCCServiceAccessibility'",
             (app_id,),
         )
         for row in cursor.fetchall():
-            if row[column]:
+            if row["auth_value"]:
                 return True
         return False
 
     def enable(self, app_id):
         if not self.installed(app_id):
             return False
-        if self.ge_bigsur_and_later or self.ge_sonoma_and_later:
-            column = "auth_value"
-        elif self.ge_mojave_and_catalina:
-            column = "allowed"
         self.connection.execute(
-            "UPDATE access SET {} = ? WHERE client=? AND service IS 'kTCCServiceAccessibility'".format(
-                column
-            ),
+            "UPDATE access SET auth_value = ? WHERE client=? AND service IS 'kTCCServiceAccessibility'",
             (1, app_id),
         )
         self.connection.commit()
@@ -393,14 +295,8 @@ class TccDB:
     def disable(self, app_id):
         if not self.installed(app_id):
             return False
-        if self.ge_bigsur_and_later or self.ge_sonoma_and_later:
-            column = "auth_value"
-        elif self.ge_mojave_and_catalina:
-            column = "allowed"
         self.connection.execute(
-            "UPDATE access SET {} = ? WHERE client=? AND service IS 'kTCCServiceAccessibility'".format(
-                column
-            ),
+            "UPDATE access SET auth_value = ? WHERE client=? AND service IS 'kTCCServiceAccessibility'",
             (0, app_id),
         )
         self.connection.commit()
@@ -419,7 +315,11 @@ class TccDB:
     def __enter__(self):
         self.connection = sqlite3.connect(self.path)
         self.connection.row_factory = sqlite3.Row
-        self._check_table_digest()
+        try:
+            self._check_schema_version()
+        except Exception:
+            self.connection.close()
+            raise
         return self
 
     def __exit__(self, *_):

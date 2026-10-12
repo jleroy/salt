@@ -539,3 +539,27 @@ class TestSyncCLIEventDispatch:
         manager._handle_terminal.assert_called_once_with(
             "JID1", {"state": {}}, "halted"
         )
+
+
+def test_first_batch_returns_after_adoption(manager, opts):
+    """Fast first-lot replies must be counted after the manager publishes them."""
+    jid = "20261011073527901233"
+    _write_state(opts, ["a", "b"], jid)
+    salt.utils.batch_state.add_to_active_index(jid, opts)
+    manager._handle_new(jid)
+    manager.local.run_job.assert_not_called()
+    manager._tick()
+    assert jid in manager.active_batches
+    manager.local.run_job.assert_called_once()
+    assert manager.local.run_job.call_args.kwargs["tgt"] == ["a", "b"]
+    for minion in ["a", "b"]:
+        manager._handle_event(
+            {
+                "tag": f"salt/job/{jid}/ret/{minion}",
+                "data": {"return": True, "retcode": 0},
+            }
+        )
+    state = salt.utils.batch_state.read_batch_state(jid, opts)
+    assert set(state["done"]) == {"a", "b"}
+    assert not state["failed"]
+    assert jid not in salt.utils.batch_state.read_active_index(opts)

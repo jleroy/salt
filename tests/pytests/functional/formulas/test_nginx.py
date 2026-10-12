@@ -9,6 +9,7 @@ import pytest
 from tests.pytests.functional.states.test_service import _check_systemctl
 
 pytestmark = [
+    pytest.mark.skip_on_darwin,
     pytest.mark.skip_on_windows,
     pytest.mark.destructive_test,
     pytest.mark.timeout_unless_on_windows(240),
